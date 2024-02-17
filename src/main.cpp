@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
+#include <cmath>
 
 #include "basic.h"
 #include "math.h"
@@ -47,7 +48,7 @@ struct State
     Array<Primitive> primitives;
 };
 
-#define ROUND_COLOR(f) (round((f) * 255.0f))
+#define ROUND_COLOR(f) (roundf((f) * 255.0f))
 
 u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
 {
@@ -285,8 +286,8 @@ f32 intersect_ellipsoid(Primitive *primitive, Ray *ray)
         return -1;
     }
 
-    f32 t_min = (-b - sqrt(discriminant)) / (2 * a);
-    f32 t_max = (-b + sqrt(discriminant)) / (2 * a);
+    f32 t_min = (-b - sqrtf(discriminant)) / (2 * a);
+    f32 t_max = (-b + sqrtf(discriminant)) / (2 * a);
 
     if (t_min > 0) {
         return t_min;

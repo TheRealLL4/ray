@@ -90,29 +90,36 @@ f32 max(Vector3 v)
     return MAX(MAX(v.x, v.y), v.z);
 }
 
-struct Vector4
+union Vector4
 {
-    f32 x = 0, y = 0, z = 0, w = 1;
+    struct
+    {
+        f32 x = 0, y = 0, z = 0, w = 1;
+    };
+
+    struct
+    {
+        f32 r, g, b, a;
+    };
 };
 
-using Quaternion = Vector4;
-
-static inline Vector3 vector_part(Quaternion q)
+union Quaternion
 {
-    return {q.x, q.y, q.z};
-}
+    struct
+    {
+        Vector3 v;
+        f32     s;
+    };
+
+    struct
+    {
+        f32 x, y, z, w = 1;
+    };
+};
 
 static inline Quaternion operator*(Quaternion q, Quaternion r)
 {
-    Vector3 v1 = vector_part(q);
-    Vector3 v2 = vector_part(r);
-
-    Vector3 v = q.w * v2 + r.w * v1 + cross(v1, v2);
-
-    return {
-        v.x, v.y, v.z,
-        q.w * r.w - dot(v1, v2),
-    };
+    return {q.w * r.v + r.w * q.v + cross(q.v, r.v), q.w * r.w - dot(q.v, r.v)};
 }
 
 Quaternion conj(Quaternion q)
@@ -122,7 +129,7 @@ Quaternion conj(Quaternion q)
 
 Vector3 rotate(Vector3 v, Quaternion q)
 {
-    Quaternion u = {v.x, v.y, v.z, 0};
-    return vector_part(q * u * conj(q));
+    Quaternion u = {v, 0};
+    return (q * u * conj(q)).v;
 }
 
