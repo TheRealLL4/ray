@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 
-./ray $1 $2
+./build/release/ray "$1" "$2"
 

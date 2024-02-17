@@ -5,6 +5,7 @@
 #include <cstdarg>
 
 #include "basic.h"
+#include "math.h"
 
 enum Primitive_Type
 {
@@ -13,24 +14,19 @@ enum Primitive_Type
     BOX = 2,
 };
 
-struct Vector3
+struct Ray
 {
-    f32 x = 0, y = 0, z = 0;
-};
-
-struct Vector4
-{
-    f32 x = 0, y = 0, z = 0, w = 1;
+    Vector3 origin, direction;
 };
 
 struct Primitive
 {
     Primitive_Type type;
-    f32 parameters[3];
+    Vector3 parameters;
 
-    Vector3 position;
-    Vector4 rotation;
-    Vector3 color;
+    Vector3    position;
+    Quaternion rotation;
+    Vector3    color;
 };
 
 struct State
@@ -45,11 +41,13 @@ struct State
         Vector3 right;
         Vector3 up;
         Vector3 forward;
-        f32     fov_x;
+        f32     fov_x_radians;
     } camera;
 
     Array<Primitive> primitives;
 };
+
+#define ROUND_COLOR(f) (round((f) * 255.0f))
 
 u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
 {
@@ -88,23 +86,23 @@ Primitive parse_primitive(char *buffer, u32 length, u32 *cursor)
         if (advance_cursor_if_starts_with(current, "PLANE ", cursor)) {
             primitive.type = PLANE;
             sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters[0], 
-                &primitive.parameters[1], 
-                &primitive.parameters[2] 
+                &primitive.parameters.x, 
+                &primitive.parameters.y, 
+                &primitive.parameters.z 
             );
         } else if (advance_cursor_if_starts_with(current, "ELLIPSOID ", cursor)) {
             primitive.type = ELLIPSOID;
             sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters[0], 
-                &primitive.parameters[1], 
-                &primitive.parameters[2] 
+                &primitive.parameters.x, 
+                &primitive.parameters.y, 
+                &primitive.parameters.z 
             );
         } else if (advance_cursor_if_starts_with(current, "BOX ", cursor)) {
             primitive.type = BOX;
             sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters[0], 
-                &primitive.parameters[1], 
-                &primitive.parameters[2] 
+                &primitive.parameters.x, 
+                &primitive.parameters.y, 
+                &primitive.parameters.z 
             );
         } else if (advance_cursor_if_starts_with(current, "POSITION ", cursor)) {
             sscanf(&buffer[*cursor], "%f %f %f", 
@@ -175,7 +173,7 @@ void parse(char *buffer, u32 length, State *state)
                 &state->camera.forward.z
             ); 
         } else if (advance_cursor_if_starts_with(current, "CAMERA_FOV_X ", &cursor)) {
-            sscanf(&buffer[cursor], "%f", &state->camera.fov_x);
+            sscanf(&buffer[cursor], "%f", &state->camera.fov_x_radians);
         } else if (advance_cursor_if_starts_with(current, "NEW_PRIMITIVE", &cursor)) {
             array_push(&state->primitives, parse_primitive(buffer, length, &cursor));
             continue;
@@ -185,7 +183,7 @@ void parse(char *buffer, u32 length, State *state)
     }
 }
 
-void write_ppm(char *file_name, u32 width, u32 height, u8 *pixels)
+void write_ppm(const char *file_name, u32 width, u32 height, u8 *pixels)
 {
     FILE *file = fopen(file_name, "wb");
     if (!file) {
@@ -202,9 +200,175 @@ void write_ppm(char *file_name, u32 width, u32 height, u8 *pixels)
     fclose(file);
 }
 
+#pragma pack(push, 1)
+struct BMP_Header
+{
+    u16 file_type;
+    u32 file_size;
+    u16 reserved1;
+    u16 reserved2;
+    u32 bitmap_offset;
+    u32 size;
+    u32 width;
+    u32 height;
+    u16 color_planes;
+    u16 bits_per_pixel;
+    u32 compression;
+    u32 size_of_bitmap;
+    u32 horizontal_resolution;
+    u32 vertical_resolution;
+    u32 colors_used;
+    u32 colors_important;
+};
+#pragma pack(pop)
+
+void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
+{
+    FILE *file = fopen(file_name, "wb");
+    if (!file) {
+        log("Could not open file `%s` for writing.", file_name);
+        return;
+    }
+
+    // HACK:
+    u32 bmp_pixels_size = 4 * width * height;
+    u8 *bmp_pixels = (u8 *) malloc(bmp_pixels_size);
+
+    // Write pixels as BGR and flip them upside-down
+    for (u32 y = 0; y < height; y++) {
+        for (u32 x = 0; x < width; x++) {
+            u32 bmp_pos = 4 * (x + y * width);
+            u32 pos = 3 * (x + (height - 1 - y) * width);
+            bmp_pixels[bmp_pos + 0] = pixels[pos + 2];
+            bmp_pixels[bmp_pos + 1] = pixels[pos + 1];
+            bmp_pixels[bmp_pos + 2] = pixels[pos + 0];
+            bmp_pixels[bmp_pos + 3] = 255;
+        }
+    }
+
+    BMP_Header bmp_header = {
+        .file_type = 0x4D42,
+        .file_size = (u32) (sizeof(BMP_Header) + bmp_pixels_size),
+        .bitmap_offset = sizeof(BMP_Header),
+        .size = sizeof(BMP_Header) - 14,
+        .width = width,
+        .height = height,
+        .color_planes = 1,
+        .bits_per_pixel = 32,
+        .size_of_bitmap = bmp_pixels_size,
+    };
+
+    fwrite(&bmp_header, 1, sizeof(bmp_header), file);
+    fwrite(bmp_pixels,  1, bmp_pixels_size,    file);
+
+    fclose(file);
+
+    free(bmp_pixels);
+}
+
+f32 intersect_plane(Primitive *primitive, Ray *ray)
+{
+    Vector3 normal = primitive->parameters;
+    return (-dot(ray->origin, normal) / dot(ray->direction, normal));
+}
+
+f32 intersect_ellipsoid(Primitive *primitive, Ray *ray)
+{
+    Vector3 semi_axes = primitive->parameters;
+
+    f32 a = dot(ray->direction / semi_axes, ray->direction / semi_axes);
+    f32 b = 2 * dot(ray->origin / semi_axes, ray->direction / semi_axes);
+    f32 c = dot(ray->origin / semi_axes, ray->origin / semi_axes) - 1.0f;
+
+    f32 discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) {
+        return -1;
+    }
+
+    f32 t_min = (-b - sqrt(discriminant)) / (2 * a);
+    f32 t_max = (-b + sqrt(discriminant)) / (2 * a);
+
+    if (t_min > 0) {
+        return t_min;
+    }
+
+    return t_max;
+}
+
+f32 intersect_box(Primitive *primitive, Ray *ray)
+{
+    Vector3 dimensions = primitive->parameters;
+
+    Vector3 t1 = (-dimensions - ray->origin) / ray->direction;
+    Vector3 t2 = ( dimensions - ray->origin) / ray->direction;
+
+    Vector3 t_min = min(t1, t2);
+    Vector3 t_max = max(t1, t2);
+
+    f32 interval_min = max(t_min);
+    f32 interval_max = min(t_max);
+
+    if (interval_min > interval_max) {
+        return -1;
+    }
+
+    if (interval_min > 0) {
+        return interval_min;
+    }
+
+    return interval_max;
+}
+
 void ray_trace(State *state, u8 *pixels)
 {
+    for (u32 y = 0; y < state->height; y++) {
+        for (u32 x = 0; x < state->width; x++) {
+            f32 t_min = INFINITY;
+            Primitive *closest = nullptr;
 
+            f32 tan_half_fov_x = tanf(state->camera.fov_x_radians / 2);
+            f32 tan_half_fov_y = (state->height * tan_half_fov_x) / state->width;
+            f32 normalized_x =  (2 * (x + 0.5f) / state->width  - 1) * tan_half_fov_x;
+            f32 normalized_y = -(2 * (y + 0.5f) / state->height - 1) * tan_half_fov_y;
+            Vector3 raw_direction = normalized_x * state->camera.right + normalized_y * state->camera.up + 1.0f * state->camera.forward;
+
+            for (u32 i = 0; i < state->primitives.size; i++) {
+                Primitive *primitive = &state->primitives[i];
+
+                Quaternion inverse_rotation = conj(primitive->rotation);
+                Ray ray = {
+                    .origin = rotate(state->camera.position - primitive->position, inverse_rotation),
+                    .direction = rotate(raw_direction, inverse_rotation),
+                };
+
+                f32 t = 0;
+                switch (primitive->type) {
+                    case PLANE:
+                        t = intersect_plane(primitive, &ray);
+                        break;
+                    case ELLIPSOID:
+                        t = intersect_ellipsoid(primitive, &ray);
+                        break;
+                    case BOX:
+                        t = intersect_box(primitive, &ray);
+                        break;
+                    default:
+                        break;
+                }
+
+                if (t > 0 && t_min > t) {
+                    t_min = t;
+                    closest = primitive;
+                }
+            }
+
+            if (closest) {
+                pixels[3 * (x + y * state->width) + 0] = ROUND_COLOR(closest->color.r);
+                pixels[3 * (x + y * state->width) + 1] = ROUND_COLOR(closest->color.g);
+                pixels[3 * (x + y * state->width) + 2] = ROUND_COLOR(closest->color.b);
+            }
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -231,14 +395,18 @@ int main(int argc, char **argv)
 
     u8 *pixels = (u8 *) malloc(3 * state.width * state.height);
     for (u32 i = 0; i < 3 * state.width * state.height; i += 3) {
-        pixels[i + 0] = round(255 * state.background_color.x);
-        pixels[i + 1] = round(255 * state.background_color.y);
-        pixels[i + 2] = round(255 * state.background_color.z);
+        pixels[i + 0] = ROUND_COLOR(state.background_color.r);
+        pixels[i + 1] = ROUND_COLOR(state.background_color.g);
+        pixels[i + 2] = ROUND_COLOR(state.background_color.b);
     }
-
+    
     ray_trace(&state, pixels);
     
     write_ppm(argv[2], state.width, state.height, pixels);
+
+#ifdef _WIN32
+    write_bmp("out.bmp", state.width, state.height, pixels);
+#endif
 
     return 0;
 }
