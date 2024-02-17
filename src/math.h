@@ -4,7 +4,7 @@ union Vector3
 {
     struct
     {
-        f32 x = 0, y = 0, z = 0;
+        f32 x, y, z;
     };
 
     struct
@@ -94,7 +94,7 @@ union Vector4
 {
     struct
     {
-        f32 x = 0, y = 0, z = 0, w = 1;
+        f32 x, y, z, w;
     };
 
     struct
@@ -113,7 +113,7 @@ union Quaternion
 
     struct
     {
-        f32 x, y, z, w = 1;
+        f32 x, y, z, w;
     };
 };
 

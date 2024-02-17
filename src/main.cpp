@@ -25,8 +25,8 @@ struct Primitive
     Primitive_Type type;
     Vector3 parameters;
 
-    Vector3    position;
-    Quaternion rotation;
+    Vector3    position = {0, 0, 0};
+    Quaternion rotation = {0, 0, 0, 1};
     Vector3    color;
 };
 
