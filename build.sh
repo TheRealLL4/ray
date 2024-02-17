@@ -19,5 +19,5 @@ COMPILER_FLAGS=(
     -o "$BUILD_DIR/$PROGRAM_NAME"
 )
 
-gcc $COMPILER_FLAGS src/main.cpp
+clang++ $COMPILER_FLAGS src/main.cpp
 
