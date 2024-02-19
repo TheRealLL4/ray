@@ -5,6 +5,12 @@
 #include <cstdarg>
 #include <cmath>
 
+#define PRIVATE_NAMESPACE_NAME  ray
+#define PRIVATE_NAMESPACE_BEGIN namespace PRIVATE_NAMESPACE_NAME { namespace {
+#define PRIVATE_NAMESPACE_END   } }
+
+PRIVATE_NAMESPACE_BEGIN
+
 #include "basic.h"
 #include "math.h"
 
@@ -47,8 +53,6 @@ struct State
 
     Array<Primitive> primitives;
 };
-
-#define ROUND_COLOR(f) (roundf((f) * 255.0f))
 
 u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
 {
@@ -320,6 +324,8 @@ f32 intersect_box(Primitive *primitive, Ray *ray)
     return interval_max;
 }
 
+#define ROUND_COLOR(f) (roundf((f) * 255.0f))
+
 void ray_trace(State *state, u8 *pixels)
 {
     for (u32 y = 0; y < state->height; y++) {
@@ -372,8 +378,20 @@ void ray_trace(State *state, u8 *pixels)
     }
 }
 
+PRIVATE_NAMESPACE_END
+
+extern "C"
+{
+
 int main(int argc, char **argv)
 {
+    using namespace ray;
+
+    if (argc != 3) {
+        log("Invalid number of command line arguments.");
+        return 1;
+    }
+
     char *input_file_name = argv[1];
     FILE *file = fopen(input_file_name, "rb");
     if (!file) {
@@ -410,5 +428,7 @@ int main(int argc, char **argv)
 #endif
 
     return 0;
+}
+
 }
 

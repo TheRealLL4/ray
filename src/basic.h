@@ -15,7 +15,7 @@ using f64 = double;
 
 // Size of static array
 template <typename T, u64 N>
-consteval static inline u64 array_size(T (&array)[N])
+static inline u64 array_size(T (&array)[N])
 {
     return N;
 }
