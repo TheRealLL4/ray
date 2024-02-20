@@ -1,17 +1,17 @@
 #pragma once
 
 // Basic types:
-using s8  = int8_t;
-using u8  = uint8_t;
-using s16 = int16_t;
-using u16 = uint16_t;
-using s32 = int32_t;
-using u32 = uint32_t;
-using s64 = int64_t;
-using u64 = uint64_t;
+typedef int8_t   s8;
+typedef uint8_t  u8;
+typedef int16_t  s16;
+typedef uint16_t u16;
+typedef int32_t  s32;
+typedef uint32_t u32;
+typedef int64_t  s64;
+typedef uint64_t u64;
 
-using f32 = float;
-using f64 = double;
+typedef float  f32;
+typedef double f64;
 
 // Size of static array
 template <typename T, u64 N>

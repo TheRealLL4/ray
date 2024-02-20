@@ -15,7 +15,7 @@ COMPILER_FLAGS="
     -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-unused-command-line-argument
     -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden
     -fno-exceptions -fno-unwind-tables -D_HAS_EXCEPTIONS=0
-    -fno-rtti -mavx2 -ffast-math
+    -fno-rtti -ffast-math -march=native
     -static-libgcc -static-libstdc++
     -fms-extensions
     -lm

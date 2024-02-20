@@ -16,19 +16,23 @@ PRIVATE_NAMESPACE_BEGIN
 
 enum Primitive_Type
 {
-    PLANE = 0,
-    ELLIPSOID = 1,
-    BOX = 2,
+    PRIMITIVE_TYPE_PLANE     = 0,
+    PRIMITIVE_TYPE_ELLIPSOID = 1,
+    PRIMITIVE_TYPE_BOX       = 2,
 };
 
-struct Ray
+enum Surface_Type
 {
-    Vector3 origin, direction;
+    SURFACE_TYPE_DIFFUSE    = 0,
+    SURFACE_TYPE_METALLIC   = 1,
+    SURFACE_TYPE_DIELECTRIC = 2,
 };
 
 struct Primitive
 {
     Primitive_Type type;
+    Surface_Type surface_type = SURFACE_TYPE_DIFFUSE;
+    f32 ior;
     Vector3 parameters;
 
     Vector3    position = {0, 0, 0};
@@ -36,7 +40,31 @@ struct Primitive
     Vector3    color;
 };
 
-struct State
+enum Light_Type
+{
+    LIGHT_TYPE_DIRECTIONAL = 0,
+    LIGHT_TYPE_POINT       = 1,
+};
+
+struct Light
+{
+    Light_Type type;
+    union
+    {
+        // Directional light
+        Vector3 direction;
+
+        // Point light
+        struct
+        {
+            Vector3 position;
+            Vector3 intensity;
+            Vector3 attenuation;
+        };
+    };
+};
+
+struct Scene
 {
     u32 width, height;
 
@@ -52,6 +80,15 @@ struct State
     } camera;
 
     Array<Primitive> primitives;
+
+    u32 ray_depth;
+    Vector3 ambient_light;
+    Array<Light> lights;
+};
+
+struct Ray
+{
+    Vector3 origin, direction;
 };
 
 u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
@@ -63,11 +100,12 @@ u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
     if (cursor < length) {
         cursor++;
     }
-
+ 
     return cursor;
 }
 
-bool advance_cursor_if_starts_with(char *buffer, const char *c_string, u32 *cursor = nullptr) {
+bool advance_cursor_if_starts_with(char *buffer, const char *c_string, u32 *cursor)
+{
     u32 c = 0;
     while (c_string[c]) {
         if (c_string[c] != buffer[c]) {
@@ -76,45 +114,28 @@ bool advance_cursor_if_starts_with(char *buffer, const char *c_string, u32 *curs
         c++;
     }
 
-    if (cursor) {
-        *cursor += c;
-    }
+    *cursor += c;
 
     return true;
 }
 
+#define SCAN_VECTOR3(buf, v) sscanf(buf, "%f %f %f", &(v).x, &(v).y, &(v).z)
 Primitive parse_primitive(char *buffer, u32 length, u32 *cursor)
 {
     Primitive primitive;
     while (*cursor < length) {
         char *current = &buffer[*cursor];
         if (advance_cursor_if_starts_with(current, "PLANE ", cursor)) {
-            primitive.type = PLANE;
-            sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters.x, 
-                &primitive.parameters.y, 
-                &primitive.parameters.z 
-            );
+            primitive.type = PRIMITIVE_TYPE_PLANE;
+            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
         } else if (advance_cursor_if_starts_with(current, "ELLIPSOID ", cursor)) {
-            primitive.type = ELLIPSOID;
-            sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters.x, 
-                &primitive.parameters.y, 
-                &primitive.parameters.z 
-            );
+            primitive.type = PRIMITIVE_TYPE_ELLIPSOID;
+            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
         } else if (advance_cursor_if_starts_with(current, "BOX ", cursor)) {
-            primitive.type = BOX;
-            sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.parameters.x, 
-                &primitive.parameters.y, 
-                &primitive.parameters.z 
-            );
+            primitive.type = PRIMITIVE_TYPE_BOX;
+            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
         } else if (advance_cursor_if_starts_with(current, "POSITION ", cursor)) {
-            sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.position.x,
-                &primitive.position.y,
-                &primitive.position.z
-            );
+            SCAN_VECTOR3(&buffer[*cursor], primitive.position);
         } else if (advance_cursor_if_starts_with(current, "ROTATION ", cursor)) {
             sscanf(&buffer[*cursor], "%f %f %f %f", 
                 &primitive.rotation.x,
@@ -123,12 +144,14 @@ Primitive parse_primitive(char *buffer, u32 length, u32 *cursor)
                 &primitive.rotation.w
             );
         } else if (advance_cursor_if_starts_with(current, "COLOR ", cursor)) {
-            sscanf(&buffer[*cursor], "%f %f %f", 
-                &primitive.color.x, 
-                &primitive.color.y, 
-                &primitive.color.z
-            );
-        } else if (advance_cursor_if_starts_with(current, "NEW_PRIMITIVE")) {
+            SCAN_VECTOR3(&buffer[*cursor], primitive.color);
+        } else if (advance_cursor_if_starts_with(current, "METALLIC", cursor)) {
+            primitive.surface_type = SURFACE_TYPE_METALLIC;
+        } else if (advance_cursor_if_starts_with(current, "DIELECTRIC", cursor)) {
+            primitive.surface_type = SURFACE_TYPE_DIELECTRIC;
+        } else if (advance_cursor_if_starts_with(current, "IOR ", cursor)) {
+            sscanf(&buffer[*cursor], "%f", &primitive.ior);
+        } else { 
             break;
         }
 
@@ -138,49 +161,60 @@ Primitive parse_primitive(char *buffer, u32 length, u32 *cursor)
     return primitive;
 }
 
-void parse(char *buffer, u32 length, State *state)
+Light parse_light(char *buffer, u32 length, u32 *cursor)
+{
+    Light light;
+    while (*cursor < length) {
+        char *current = &buffer[*cursor];
+        if (advance_cursor_if_starts_with(current, "LIGHT_INTENSITY ", cursor)) {
+            SCAN_VECTOR3(&buffer[*cursor], light.intensity);
+        } else if (advance_cursor_if_starts_with(current, "LIGHT_DIRECTION ", cursor)) {
+            light.type = LIGHT_TYPE_DIRECTIONAL;
+            SCAN_VECTOR3(&buffer[*cursor], light.direction);
+        } else if (advance_cursor_if_starts_with(current, "LIGHT_POSITION ", cursor)) {
+            light.type = LIGHT_TYPE_POINT;
+            SCAN_VECTOR3(&buffer[*cursor], light.position);
+        } else if (advance_cursor_if_starts_with(current, "LIGHT_ATTENUATION ", cursor)) {
+            SCAN_VECTOR3(&buffer[*cursor], light.attenuation);
+        } else {
+            break;
+        }
+
+        *cursor = skip_to_next_line(buffer, length, *cursor);
+    }
+
+    return light;
+}
+
+void parse(char *buffer, u32 length, Scene *scene)
 {
     u32 cursor = 0;
 
     while (cursor < length) {
         char *current = &buffer[cursor];
-
         if (advance_cursor_if_starts_with(current, "DIMENSIONS ", &cursor)) {
-            sscanf(&buffer[cursor], "%d %d", &state->width, &state->height);
+            sscanf(&buffer[cursor], "%d %d", &scene->width, &scene->height);
         } else if (advance_cursor_if_starts_with(current, "BG_COLOR ", &cursor)) {
-            sscanf(&buffer[cursor], "%f %f %f", 
-                &state->background_color.x, 
-                &state->background_color.y, 
-                &state->background_color.z
-            ); 
+            SCAN_VECTOR3(&buffer[cursor], scene->background_color);
         } else if (advance_cursor_if_starts_with(current, "CAMERA_POSITION ", &cursor)) {
-            sscanf(&buffer[cursor], "%f %f %f", 
-                &state->camera.position.x, 
-                &state->camera.position.y, 
-                &state->camera.position.z
-            ); 
+            SCAN_VECTOR3(&buffer[cursor], scene->camera.position);
         } else if (advance_cursor_if_starts_with(current, "CAMERA_RIGHT ", &cursor)) {
-            sscanf(&buffer[cursor], "%f %f %f", 
-                &state->camera.right.x, 
-                &state->camera.right.y, 
-                &state->camera.right.z
-            ); 
+            SCAN_VECTOR3(&buffer[cursor], scene->camera.right);
         } else if (advance_cursor_if_starts_with(current, "CAMERA_UP ", &cursor)) {
-            sscanf(&buffer[cursor], "%f %f %f", 
-                &state->camera.up.x, 
-                &state->camera.up.y, 
-                &state->camera.up.z
-            ); 
+            SCAN_VECTOR3(&buffer[cursor], scene->camera.up);
         } else if (advance_cursor_if_starts_with(current, "CAMERA_FORWARD ", &cursor)) {
-            sscanf(&buffer[cursor], "%f %f %f", 
-                &state->camera.forward.x, 
-                &state->camera.forward.y, 
-                &state->camera.forward.z
-            ); 
+            SCAN_VECTOR3(&buffer[cursor], scene->camera.forward);
         } else if (advance_cursor_if_starts_with(current, "CAMERA_FOV_X ", &cursor)) {
-            sscanf(&buffer[cursor], "%f", &state->camera.fov_x_radians);
-        } else if (advance_cursor_if_starts_with(current, "NEW_PRIMITIVE", &cursor)) {
-            array_push(&state->primitives, parse_primitive(buffer, length, &cursor));
+            sscanf(&buffer[cursor], "%f", &scene->camera.fov_x_radians);
+        } else if (advance_cursor_if_starts_with(current, "NEW_PRIMITIVE\n", &cursor)) {
+            array_push(&scene->primitives, parse_primitive(buffer, length, &cursor));
+            continue;
+        } else if (advance_cursor_if_starts_with(current, "RAY_DEPTH ", &cursor)) {
+            sscanf(&buffer[cursor], "%u", &scene->ray_depth);
+        } else if (advance_cursor_if_starts_with(current, "AMBIENT_LIGHT ", &cursor)) {
+            SCAN_VECTOR3(&buffer[cursor], scene->ambient_light);
+        } else if (advance_cursor_if_starts_with(current, "NEW_LIGHT\n", &cursor)) {
+            array_push(&scene->lights, parse_light(buffer, length, &cursor));
             continue;
         }
 
@@ -205,6 +239,7 @@ void write_ppm(const char *file_name, u32 width, u32 height, u8 *pixels)
     fclose(file);
 }
 
+#ifdef _WIN32
 #pragma pack(push, 1)
 struct BMP_Header
 {
@@ -270,6 +305,7 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 
     free(bmp_pixels);
 }
+#endif
 
 f32 intersect_plane(Primitive *primitive, Ray *ray)
 {
@@ -326,37 +362,37 @@ f32 intersect_box(Primitive *primitive, Ray *ray)
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
 
-void ray_trace(State *state, u8 *pixels)
+void ray_trace(Scene *scene, u8 *pixels)
 {
-    for (u32 y = 0; y < state->height; y++) {
-        for (u32 x = 0; x < state->width; x++) {
+    for (u32 y = 0; y < scene->height; y++) {
+        for (u32 x = 0; x < scene->width; x++) {
             f32 t_min = INFINITY;
             Primitive *closest = nullptr;
 
-            f32 tan_half_fov_x = tanf(state->camera.fov_x_radians / 2);
-            f32 tan_half_fov_y = (state->height * tan_half_fov_x) / state->width;
-            f32 normalized_x =  (2 * (x + 0.5f) / state->width  - 1) * tan_half_fov_x;
-            f32 normalized_y = -(2 * (y + 0.5f) / state->height - 1) * tan_half_fov_y;
-            Vector3 raw_direction = normalized_x * state->camera.right + normalized_y * state->camera.up + 1.0f * state->camera.forward;
+            f32 tan_half_fov_x = tanf(scene->camera.fov_x_radians / 2);
+            f32 tan_half_fov_y = (scene->height * tan_half_fov_x) / scene->width;
+            f32 normalized_x =  (2 * (x + 0.5f) / scene->width  - 1) * tan_half_fov_x;
+            f32 normalized_y = -(2 * (y + 0.5f) / scene->height - 1) * tan_half_fov_y;
+            Vector3 raw_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
 
-            for (u32 i = 0; i < state->primitives.size; i++) {
-                Primitive *primitive = &state->primitives[i];
+            for (u32 i = 0; i < scene->primitives.size; i++) {
+                Primitive *primitive = &scene->primitives[i];
 
                 Quaternion inverse_rotation = conj(primitive->rotation);
                 Ray ray = {
-                    .origin = rotate(state->camera.position - primitive->position, inverse_rotation),
+                    .origin = rotate(scene->camera.position - primitive->position, inverse_rotation),
                     .direction = rotate(raw_direction, inverse_rotation),
                 };
 
                 f32 t = 0;
                 switch (primitive->type) {
-                    case PLANE:
+                    case PRIMITIVE_TYPE_PLANE:
                         t = intersect_plane(primitive, &ray);
                         break;
-                    case ELLIPSOID:
+                    case PRIMITIVE_TYPE_ELLIPSOID:
                         t = intersect_ellipsoid(primitive, &ray);
                         break;
-                    case BOX:
+                    case PRIMITIVE_TYPE_BOX:
                         t = intersect_box(primitive, &ray);
                         break;
                     default:
@@ -370,9 +406,9 @@ void ray_trace(State *state, u8 *pixels)
             }
 
             if (closest) {
-                pixels[3 * (x + y * state->width) + 0] = ROUND_COLOR(closest->color.r);
-                pixels[3 * (x + y * state->width) + 1] = ROUND_COLOR(closest->color.g);
-                pixels[3 * (x + y * state->width) + 2] = ROUND_COLOR(closest->color.b);
+                pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(closest->color.r);
+                pixels[3 * (x + y * scene->width) + 1] = ROUND_COLOR(closest->color.g);
+                pixels[3 * (x + y * scene->width) + 2] = ROUND_COLOR(closest->color.b);
             }
         }
     }
@@ -409,22 +445,22 @@ int main(int argc, char **argv)
 
     fclose(file);
 
-    State state = {};
-    parse(buffer, length, &state);
+    Scene scene = {};
+    parse(buffer, length, &scene);
 
-    u8 *pixels = (u8 *) malloc(3 * state.width * state.height);
-    for (u32 i = 0; i < 3 * state.width * state.height; i += 3) {
-        pixels[i + 0] = ROUND_COLOR(state.background_color.r);
-        pixels[i + 1] = ROUND_COLOR(state.background_color.g);
-        pixels[i + 2] = ROUND_COLOR(state.background_color.b);
+    u8 *pixels = (u8 *) malloc(3 * scene.width * scene.height);
+    for (u32 i = 0; i < 3 * scene.width * scene.height; i += 3) {
+        pixels[i + 0] = ROUND_COLOR(scene.background_color.r);
+        pixels[i + 1] = ROUND_COLOR(scene.background_color.g);
+        pixels[i + 2] = ROUND_COLOR(scene.background_color.b);
     }
     
-    ray_trace(&state, pixels);
+    ray_trace(&scene, pixels);
     
-    write_ppm(argv[2], state.width, state.height, pixels);
+    write_ppm(argv[2], scene.width, scene.height, pixels);
 
 #ifdef _WIN32
-    write_bmp("out.bmp", state.width, state.height, pixels);
+    write_bmp("out.bmp", scene.width, scene.height, pixels);
 #endif
 
     return 0;

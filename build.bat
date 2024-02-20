@@ -41,7 +41,7 @@ IF %ERRORLEVEL% NEQ 0 (echo "ERROR: clang not found. Please set up LLVM and add 
 SET COMPILER_FLAGS=^
     %TARGET_COMPILER_FLAGS%^
     -Wall -Wextra -Wpedantic -Wno-language-extension-token -Wno-unused-parameter -Wno-reorder-init-list -Wno-c99-designator -D_CRT_SECURE_NO_WARNINGS=1^
-    -Wno-gnu-anonymous-struct -Wno-missing-braces^
+    -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-nested-anon-types^
     -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden^
     -fno-exceptions -fno-unwind-tables -D_HAS_EXCEPTIONS=0^
     -fno-rtti -mavx2 -ffast-math^

@@ -167,17 +167,27 @@ static inline f32 max(Vector3 v)
     return MAX(MAX(v.x, v.y), v.z);
 }
 
+static inline Vector3 pow(Vector3 v, f32 a)
+{
+    return {powf(v.x, a), powf(v.y, a), powf(v.z, a)};
+}
+
+static inline Vector3 pow(Vector3 v, Vector3 e)
+{
+    return {powf(v.x, e.x), powf(v.y, e.y), powf(v.z, e.z)};
+}
+
 union Quaternion
 {
     struct
     {
-        Vector3 v;
-        f32     s;
+        f32 x, y, z, w;
     };
 
     struct
     {
-        f32 x, y, z, w;
+        Vector3 v;
+        f32     s;
     };
 };
 
