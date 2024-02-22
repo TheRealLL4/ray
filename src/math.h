@@ -181,13 +181,13 @@ union Quaternion
 {
     struct
     {
-        f32 x, y, z, w;
+        Vector3 v;
+        f32     s;
     };
 
     struct
     {
-        Vector3 v;
-        f32     s;
+        f32 x, y, z, w;
     };
 };
 

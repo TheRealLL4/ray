@@ -16,22 +16,22 @@ PRIVATE_NAMESPACE_BEGIN
 
 enum Primitive_Type
 {
-    PRIMITIVE_TYPE_PLANE     = 0,
-    PRIMITIVE_TYPE_ELLIPSOID = 1,
-    PRIMITIVE_TYPE_BOX       = 2,
+    PRIMITIVE_PLANE     = 0,
+    PRIMITIVE_ELLIPSOID = 1,
+    PRIMITIVE_BOX       = 2,
 };
 
 enum Surface_Type
 {
-    SURFACE_TYPE_DIFFUSE    = 0,
-    SURFACE_TYPE_METALLIC   = 1,
-    SURFACE_TYPE_DIELECTRIC = 2,
+    SURFACE_DIFFUSE    = 0,
+    SURFACE_METALLIC   = 1,
+    SURFACE_DIELECTRIC = 2,
 };
 
 struct Primitive
 {
     Primitive_Type type;
-    Surface_Type surface_type = SURFACE_TYPE_DIFFUSE;
+    Surface_Type surface_type = SURFACE_DIFFUSE;
     f32 ior;
     Vector3 parameters;
 
@@ -42,8 +42,8 @@ struct Primitive
 
 enum Light_Type
 {
-    LIGHT_TYPE_DIRECTIONAL = 0,
-    LIGHT_TYPE_POINT       = 1,
+    LIGHT_DIRECTIONAL = 0,
+    LIGHT_POINT       = 1,
 };
 
 struct Light
@@ -91,134 +91,139 @@ struct Ray
     Vector3 origin, direction;
 };
 
-u32 skip_to_next_line(char *buffer, u32 length, u32 cursor)
+struct Parser
 {
-    while (cursor < length && buffer[cursor] != '\n' && buffer[cursor] != '\r') {
-        cursor++;
-    }
+    char *buffer;
+    u32 length;
+    u32 cursor;
+};
 
-    if (cursor < length) {
-        cursor++;
-    }
- 
-    return cursor;
+inline char *current(Parser *parser)
+{
+    return (parser->buffer + parser->cursor);
 }
 
-bool advance_cursor_if_starts_with(char *buffer, const char *c_string, u32 *cursor)
+void skip_to_next_line(Parser *parser)
+{
+    while (parser->cursor < parser->length && parser->buffer[parser->cursor] != '\n') {
+        parser->cursor += 1;
+    }
+
+    if (parser->cursor < parser->length) {
+        parser->cursor += 1;
+    }
+}
+
+bool advance_if_starts_with(Parser *parser, const char *c_string)
 {
     u32 c = 0;
     while (c_string[c]) {
-        if (c_string[c] != buffer[c]) {
+        if (((parser->cursor + c) >= parser->length) || (c_string[c] != current(parser)[c])) {
             return false;
         }
         c++;
     }
 
-    *cursor += c;
+    parser->cursor += c;
 
     return true;
 }
 
-#define SCAN_VECTOR3(buf, v) sscanf(buf, "%f %f %f", &(v).x, &(v).y, &(v).z)
-Primitive parse_primitive(char *buffer, u32 length, u32 *cursor)
+#define SCAN_VECTOR3(parser, v) sscanf(current(parser), "%f %f %f", &(v).x, &(v).y, &(v).z)
+Primitive parse_primitive(Parser *parser)
 {
     Primitive primitive;
-    while (*cursor < length) {
-        char *current = &buffer[*cursor];
-        if (advance_cursor_if_starts_with(current, "PLANE ", cursor)) {
-            primitive.type = PRIMITIVE_TYPE_PLANE;
-            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
-        } else if (advance_cursor_if_starts_with(current, "ELLIPSOID ", cursor)) {
-            primitive.type = PRIMITIVE_TYPE_ELLIPSOID;
-            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
-        } else if (advance_cursor_if_starts_with(current, "BOX ", cursor)) {
-            primitive.type = PRIMITIVE_TYPE_BOX;
-            SCAN_VECTOR3(&buffer[*cursor], primitive.parameters);
-        } else if (advance_cursor_if_starts_with(current, "POSITION ", cursor)) {
-            SCAN_VECTOR3(&buffer[*cursor], primitive.position);
-        } else if (advance_cursor_if_starts_with(current, "ROTATION ", cursor)) {
-            sscanf(&buffer[*cursor], "%f %f %f %f", 
+    while (parser->cursor < parser->length) {
+        if (advance_if_starts_with(parser, "PLANE ")) {
+            primitive.type = PRIMITIVE_PLANE;
+            SCAN_VECTOR3(parser, primitive.parameters);
+        } else if (advance_if_starts_with(parser, "ELLIPSOID ")) {
+            primitive.type = PRIMITIVE_ELLIPSOID;
+            SCAN_VECTOR3(parser, primitive.parameters);
+        } else if (advance_if_starts_with(parser, "BOX ")) {
+            primitive.type = PRIMITIVE_BOX;
+            SCAN_VECTOR3(parser, primitive.parameters);
+        } else if (advance_if_starts_with(parser, "POSITION ")) {
+            SCAN_VECTOR3(parser, primitive.position);
+        } else if (advance_if_starts_with(parser, "ROTATION ")) {
+            sscanf(current(parser), "%f %f %f %f",
                 &primitive.rotation.x,
                 &primitive.rotation.y,
                 &primitive.rotation.z,
                 &primitive.rotation.w
             );
-        } else if (advance_cursor_if_starts_with(current, "COLOR ", cursor)) {
-            SCAN_VECTOR3(&buffer[*cursor], primitive.color);
-        } else if (advance_cursor_if_starts_with(current, "METALLIC", cursor)) {
-            primitive.surface_type = SURFACE_TYPE_METALLIC;
-        } else if (advance_cursor_if_starts_with(current, "DIELECTRIC", cursor)) {
-            primitive.surface_type = SURFACE_TYPE_DIELECTRIC;
-        } else if (advance_cursor_if_starts_with(current, "IOR ", cursor)) {
-            sscanf(&buffer[*cursor], "%f", &primitive.ior);
+        } else if (advance_if_starts_with(parser, "COLOR ")) {
+            SCAN_VECTOR3(parser, primitive.color);
+        } else if (advance_if_starts_with(parser, "METALLIC")) {
+            primitive.surface_type = SURFACE_METALLIC;
+        } else if (advance_if_starts_with(parser, "DIELECTRIC")) {
+            primitive.surface_type = SURFACE_DIELECTRIC;
+        } else if (advance_if_starts_with(parser, "IOR ")) {
+            sscanf(current(parser), "%f", &primitive.ior);
         } else { 
             break;
         }
 
-        *cursor = skip_to_next_line(buffer, length, *cursor);
+        skip_to_next_line(parser);
     }
 
     return primitive;
 }
 
-Light parse_light(char *buffer, u32 length, u32 *cursor)
+Light parse_light(Parser *parser)
 {
     Light light;
-    while (*cursor < length) {
-        char *current = &buffer[*cursor];
-        if (advance_cursor_if_starts_with(current, "LIGHT_INTENSITY ", cursor)) {
-            SCAN_VECTOR3(&buffer[*cursor], light.intensity);
-        } else if (advance_cursor_if_starts_with(current, "LIGHT_DIRECTION ", cursor)) {
-            light.type = LIGHT_TYPE_DIRECTIONAL;
-            SCAN_VECTOR3(&buffer[*cursor], light.direction);
-        } else if (advance_cursor_if_starts_with(current, "LIGHT_POSITION ", cursor)) {
-            light.type = LIGHT_TYPE_POINT;
-            SCAN_VECTOR3(&buffer[*cursor], light.position);
-        } else if (advance_cursor_if_starts_with(current, "LIGHT_ATTENUATION ", cursor)) {
-            SCAN_VECTOR3(&buffer[*cursor], light.attenuation);
+    while (parser->cursor < parser->length) {
+        if (advance_if_starts_with(parser, "LIGHT_INTENSITY ")) {
+            SCAN_VECTOR3(parser, light.intensity);
+        } else if (advance_if_starts_with(parser, "LIGHT_DIRECTION ")) {
+            light.type = LIGHT_DIRECTIONAL;
+            SCAN_VECTOR3(parser, light.direction);
+        } else if (advance_if_starts_with(parser, "LIGHT_POSITION ")) {
+            light.type = LIGHT_POINT;
+            SCAN_VECTOR3(parser, light.position);
+        } else if (advance_if_starts_with(parser, "LIGHT_ATTENUATION ")) {
+            SCAN_VECTOR3(parser, light.attenuation);
         } else {
             break;
         }
 
-        *cursor = skip_to_next_line(buffer, length, *cursor);
+        skip_to_next_line(parser);
     }
 
     return light;
 }
 
-void parse(char *buffer, u32 length, Scene *scene)
+void parse(Parser *parser, Scene *scene)
 {
-    u32 cursor = 0;
-
-    while (cursor < length) {
-        char *current = &buffer[cursor];
-        if (advance_cursor_if_starts_with(current, "DIMENSIONS ", &cursor)) {
-            sscanf(&buffer[cursor], "%d %d", &scene->width, &scene->height);
-        } else if (advance_cursor_if_starts_with(current, "BG_COLOR ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->background_color);
-        } else if (advance_cursor_if_starts_with(current, "CAMERA_POSITION ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->camera.position);
-        } else if (advance_cursor_if_starts_with(current, "CAMERA_RIGHT ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->camera.right);
-        } else if (advance_cursor_if_starts_with(current, "CAMERA_UP ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->camera.up);
-        } else if (advance_cursor_if_starts_with(current, "CAMERA_FORWARD ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->camera.forward);
-        } else if (advance_cursor_if_starts_with(current, "CAMERA_FOV_X ", &cursor)) {
-            sscanf(&buffer[cursor], "%f", &scene->camera.fov_x_radians);
-        } else if (advance_cursor_if_starts_with(current, "NEW_PRIMITIVE\n", &cursor)) {
-            array_push(&scene->primitives, parse_primitive(buffer, length, &cursor));
+    while (parser->cursor < parser->length) {
+        if (advance_if_starts_with(parser, "DIMENSIONS ")) {
+            sscanf(current(parser), "%d %d", &scene->width, &scene->height);
+        } else if (advance_if_starts_with(parser, "BG_COLOR ")) {
+            SCAN_VECTOR3(parser, scene->background_color);
+        } else if (advance_if_starts_with(parser, "CAMERA_POSITION ")) {
+            SCAN_VECTOR3(parser, scene->camera.position);
+        } else if (advance_if_starts_with(parser, "CAMERA_RIGHT ")) {
+            SCAN_VECTOR3(parser, scene->camera.right);
+        } else if (advance_if_starts_with(parser, "CAMERA_UP ")) {
+            SCAN_VECTOR3(parser, scene->camera.up);
+        } else if (advance_if_starts_with(parser, "CAMERA_FORWARD ")) {
+            SCAN_VECTOR3(parser, scene->camera.forward);
+        } else if (advance_if_starts_with(parser, "CAMERA_FOV_X ")) {
+            sscanf(current(parser), "%f", &scene->camera.fov_x_radians);
+        } else if (advance_if_starts_with(parser, "NEW_PRIMITIVE\n")) {
+            array_push(&scene->primitives, parse_primitive(parser));
             continue;
-        } else if (advance_cursor_if_starts_with(current, "RAY_DEPTH ", &cursor)) {
-            sscanf(&buffer[cursor], "%u", &scene->ray_depth);
-        } else if (advance_cursor_if_starts_with(current, "AMBIENT_LIGHT ", &cursor)) {
-            SCAN_VECTOR3(&buffer[cursor], scene->ambient_light);
-        } else if (advance_cursor_if_starts_with(current, "NEW_LIGHT\n", &cursor)) {
-            array_push(&scene->lights, parse_light(buffer, length, &cursor));
+        } else if (advance_if_starts_with(parser, "RAY_DEPTH ")) {
+            sscanf(current(parser), "%u", &scene->ray_depth);
+        } else if (advance_if_starts_with(parser, "AMBIENT_LIGHT ")) {
+            SCAN_VECTOR3(parser, scene->ambient_light);
+        } else if (advance_if_starts_with(parser, "NEW_LIGHT\n")) {
+            array_push(&scene->lights, parse_light(parser));
             continue;
         }
 
-        cursor = skip_to_next_line(buffer, length, cursor);
+        skip_to_next_line(parser);
     }
 }
 
@@ -274,7 +279,7 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
     u32 bmp_pixels_size = 4 * width * height;
     u8 *bmp_pixels = (u8 *) malloc(bmp_pixels_size);
 
-    // Write pixels as BGR and flip them upside-down
+    // Write pixels as BGR and flip them upside down
     for (u32 y = 0; y < height; y++) {
         for (u32 x = 0; x < width; x++) {
             u32 bmp_pos = 4 * (x + y * width);
@@ -375,25 +380,23 @@ void ray_trace(Scene *scene, u8 *pixels)
             f32 normalized_y = -(2 * (y + 0.5f) / scene->height - 1) * tan_half_fov_y;
             Vector3 raw_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
 
-            for (u32 i = 0; i < scene->primitives.size; i++) {
-                Primitive *primitive = &scene->primitives[i];
-
-                Quaternion inverse_rotation = conj(primitive->rotation);
+            FOR_EACH(scene->primitives) {
+                Quaternion inverse_rotation = conj(it->rotation);
                 Ray ray = {
-                    .origin = rotate(scene->camera.position - primitive->position, inverse_rotation),
+                    .origin = rotate(scene->camera.position - it->position, inverse_rotation),
                     .direction = rotate(raw_direction, inverse_rotation),
                 };
 
                 f32 t = 0;
-                switch (primitive->type) {
-                    case PRIMITIVE_TYPE_PLANE:
-                        t = intersect_plane(primitive, &ray);
+                switch (it->type) {
+                    case PRIMITIVE_PLANE:
+                        t = intersect_plane(it, &ray);
                         break;
-                    case PRIMITIVE_TYPE_ELLIPSOID:
-                        t = intersect_ellipsoid(primitive, &ray);
+                    case PRIMITIVE_ELLIPSOID:
+                        t = intersect_ellipsoid(it, &ray);
                         break;
-                    case PRIMITIVE_TYPE_BOX:
-                        t = intersect_box(primitive, &ray);
+                    case PRIMITIVE_BOX:
+                        t = intersect_box(it, &ray);
                         break;
                     default:
                         break;
@@ -401,7 +404,7 @@ void ray_trace(Scene *scene, u8 *pixels)
 
                 if (t > 0 && t_min > t) {
                     t_min = t;
-                    closest = primitive;
+                    closest = it;
                 }
             }
 
@@ -446,7 +449,8 @@ int main(int argc, char **argv)
     fclose(file);
 
     Scene scene = {};
-    parse(buffer, length, &scene);
+    Parser parser = {.buffer = buffer, .length = length};
+    parse(&parser, &scene);
 
     u8 *pixels = (u8 *) malloc(3 * scene.width * scene.height);
     for (u32 i = 0; i < 3 * scene.width * scene.height; i += 3) {

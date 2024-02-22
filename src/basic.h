@@ -103,6 +103,8 @@ struct Array
     }
 };
 
+#define FOR_EACH(array) for (auto it = (array).data; it != ((array).data + (array).size); it++)
+
 template <typename T>
 static inline void array_maybe_expand(Array<T> *array, u32 to_add) 
 {

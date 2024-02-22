@@ -12,7 +12,7 @@ TARGET_COMPILER_FLAGS="
 COMPILER_FLAGS="
     $TARGET_COMPILER_FLAGS
     -Wall -Wextra -Wpedantic -Wno-language-extension-token -Wno-unused-parameter -Wno-reorder-init-list -Wno-c99-designator -D_CRT_SECURE_NO_WARNINGS=1
-    -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-unused-command-line-argument
+    -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-unused-command-line-argument -Wno-nested-anon-types
     -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden
     -fno-exceptions -fno-unwind-tables -D_HAS_EXCEPTIONS=0
     -fno-rtti -ffast-math -march=native
