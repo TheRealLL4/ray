@@ -106,7 +106,7 @@ struct Array
 #define FOR_EACH(array) for (auto it = (array).data; it != ((array).data + (array).size); it++)
 
 template <typename T>
-static inline void array_maybe_expand(Array<T> *array, u32 to_add) 
+static inline void array_maybe_expand(Array<T> *array, u32 to_add)
 {
     u32 minimal_capacity = array->size + to_add;
     if (minimal_capacity <= array->capacity) {
@@ -142,7 +142,7 @@ static inline void array_push(Array<T> *array, T value)
 template <typename T>
 static inline void array_reserve(Array<T> *array, u32 count)
 {
-    array_maybe_expand(array, count); 
+    array_maybe_expand(array, count);
 }
 
 template <typename T>

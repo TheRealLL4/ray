@@ -91,6 +91,13 @@ struct Ray
     Vector3 origin, direction;
 };
 
+struct Intersection
+{
+    f32 t;
+    Vector3 normal;
+    bool inner;
+};
+
 struct Parser
 {
     char *buffer;
@@ -160,7 +167,7 @@ Primitive parse_primitive(Parser *parser)
             primitive.surface_type = SURFACE_DIELECTRIC;
         } else if (advance_if_starts_with(parser, "IOR ")) {
             sscanf(current(parser), "%f", &primitive.ior);
-        } else { 
+        } else {
             break;
         }
 
@@ -312,15 +319,26 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 }
 #endif
 
-f32 intersect_plane(Primitive *primitive, Ray *ray)
+Intersection intersect_plane(Primitive *plane, Ray *ray)
 {
-    Vector3 normal = primitive->parameters;
-    return (-dot(ray->origin, normal) / dot(ray->direction, normal));
+    Vector3 object_normal = plane->parameters;
+
+    Intersection intersection = {
+        .t = (-dot(ray->origin, object_normal) / dot(ray->direction, object_normal)),
+        .normal = normalize(rotate(object_normal, plane->rotation)),
+    };
+
+    if (dot(object_normal, ray->direction) > 0) {
+        intersection.normal = -intersection.normal;
+        intersection.inner = true;
+    }
+
+    return intersection;
 }
 
-f32 intersect_ellipsoid(Primitive *primitive, Ray *ray)
+Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
 {
-    Vector3 semi_axes = primitive->parameters;
+    Vector3 semi_axes = ellipsoid->parameters;
 
     f32 a = dot(ray->direction / semi_axes, ray->direction / semi_axes);
     f32 b = 2 * dot(ray->origin / semi_axes, ray->direction / semi_axes);
@@ -328,22 +346,36 @@ f32 intersect_ellipsoid(Primitive *primitive, Ray *ray)
 
     f32 discriminant = b * b - 4 * a * c;
     if (discriminant < 0) {
-        return -1;
+        return {.t = -1};
     }
 
     f32 t_min = (-b - sqrtf(discriminant)) / (2 * a);
     f32 t_max = (-b + sqrtf(discriminant)) / (2 * a);
 
+    f32 t = -1;
     if (t_min > 0) {
-        return t_min;
+        t = t_min;
+    } else {
+        t = t_max;
     }
 
-    return t_max;
+    Intersection intersection = {
+        .t = t,
+        .normal = normalize(rotate(ray->direction / semi_axes, ellipsoid->rotation)),
+    };
+
+    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes;
+    if (dot(object_normal, ray->direction) > 0) {
+        intersection.normal = -intersection.normal;
+        intersection.inner = true;
+    }
+
+    return intersection;
 }
 
-f32 intersect_box(Primitive *primitive, Ray *ray)
+Intersection intersect_box(Primitive *box, Ray *ray)
 {
-    Vector3 dimensions = primitive->parameters;
+    Vector3 dimensions = box->parameters;
 
     Vector3 t1 = (-dimensions - ray->origin) / ray->direction;
     Vector3 t2 = ( dimensions - ray->origin) / ray->direction;
@@ -355,58 +387,88 @@ f32 intersect_box(Primitive *primitive, Ray *ray)
     f32 interval_max = min(t_max);
 
     if (interval_min > interval_max) {
-        return -1;
+        return {.t = -1};
     }
 
+    f32 t = -1.0f;
     if (interval_min > 0) {
-        return interval_min;
+        t = interval_min;
+    } else {
+        t = interval_max;
     }
 
-    return interval_max;
+    Vector3 object_normal = (ray->origin + t * ray->direction) / dimensions;
+    for (u32 i = 0; i < 3; i++) {
+        if (fabsf(object_normal[i]) != 1.0f) {
+            object_normal[i] = 0.0f;
+        }
+    }
+
+    Intersection intersection = {
+        .t = t,
+        .normal = normalize(rotate(object_normal, box->rotation)),
+    };
+
+    if (dot(ray->direction, object_normal) > 0) {
+        intersection.normal = -intersection.normal;
+        intersection.inner = true;
+    }
+
+    return intersection;
+}
+
+Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **closest, f32 t_max = INFINITY)
+{
+    Intersection intersection = {};
+    *closest = nullptr;
+
+    f32 t_min = INFINITY;
+    FOR_EACH(primitives) {
+        Quaternion inverse_rotation = conj(it->rotation);
+        Ray ray = {
+            .origin = rotate(world_ray->origin - it->position, inverse_rotation),
+            .direction = rotate(world_ray->direction, inverse_rotation),
+        };
+
+        switch (it->type) {
+            case PRIMITIVE_PLANE:
+                intersection = intersect_plane(it, &ray);
+                break;
+            case PRIMITIVE_ELLIPSOID:
+                intersection = intersect_ellipsoid(it, &ray);
+                break;
+            case PRIMITIVE_BOX:
+                intersection = intersect_box(it, &ray);
+                break;
+        }
+
+        if (intersection.t > 0 && intersection.t < t_max && t_min > intersection.t) {
+            t_min = intersection.t;
+            *closest = it;
+        }
+    }
+
+    return intersection;
 }
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
-
 void ray_trace(Scene *scene, u8 *pixels)
 {
     for (u32 y = 0; y < scene->height; y++) {
         for (u32 x = 0; x < scene->width; x++) {
-            f32 t_min = INFINITY;
-            Primitive *closest = nullptr;
-
             f32 tan_half_fov_x = tanf(scene->camera.fov_x_radians / 2);
             f32 tan_half_fov_y = (scene->height * tan_half_fov_x) / scene->width;
             f32 normalized_x =  (2 * (x + 0.5f) / scene->width  - 1) * tan_half_fov_x;
             f32 normalized_y = -(2 * (y + 0.5f) / scene->height - 1) * tan_half_fov_y;
-            Vector3 raw_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
+            Vector3 camera_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
 
-            FOR_EACH(scene->primitives) {
-                Quaternion inverse_rotation = conj(it->rotation);
-                Ray ray = {
-                    .origin = rotate(scene->camera.position - it->position, inverse_rotation),
-                    .direction = rotate(raw_direction, inverse_rotation),
-                };
+            Ray camera_ray = {
+                .origin = scene->camera.position,
+                .direction = camera_direction,
+            };
 
-                f32 t = 0;
-                switch (it->type) {
-                    case PRIMITIVE_PLANE:
-                        t = intersect_plane(it, &ray);
-                        break;
-                    case PRIMITIVE_ELLIPSOID:
-                        t = intersect_ellipsoid(it, &ray);
-                        break;
-                    case PRIMITIVE_BOX:
-                        t = intersect_box(it, &ray);
-                        break;
-                    default:
-                        break;
-                }
-
-                if (t > 0 && t_min > t) {
-                    t_min = t;
-                    closest = it;
-                }
-            }
+            Primitive *closest = nullptr;
+            Intersection intersection = intersect(scene->primitives, &camera_ray, &closest);
 
             if (closest) {
                 pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(closest->color.r);
@@ -458,9 +520,9 @@ int main(int argc, char **argv)
         pixels[i + 1] = ROUND_COLOR(scene.background_color.g);
         pixels[i + 2] = ROUND_COLOR(scene.background_color.b);
     }
-    
+
     ray_trace(&scene, pixels);
-    
+
     write_ppm(argv[2], scene.width, scene.height, pixels);
 
 #ifdef _WIN32

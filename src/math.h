@@ -8,6 +8,11 @@ union Vector2
     };
 
     f32 e[2];
+
+    f32 &operator[](u32 index)
+    {
+        return this->e[index];
+    }
 };
 
 static inline Vector2 operator-(Vector2 v)
@@ -78,6 +83,11 @@ union Vector3
     };
 
     f32 e[3];
+
+    f32 &operator[](u32 index)
+    {
+        return this->e[index];
+    }
 };
 
 static inline Vector3 operator-(Vector3 v)
