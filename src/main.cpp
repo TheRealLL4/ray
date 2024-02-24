@@ -510,7 +510,7 @@ void ray_trace(Scene *scene, u8 *pixels)
                     }
                     light_ray.direction = normalize(light_ray.direction);
 
-                    light_ray.origin = intersection_point + 1E-4 * intersection.normal;
+                    light_ray.origin = intersection_point + 1E-4 * light_ray.direction;
 
                     f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
                     if (diffuse_coeff < 0) {
