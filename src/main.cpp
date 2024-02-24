@@ -359,12 +359,13 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
         t = t_max;
     }
 
+    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes;
+
     Intersection intersection = {
         .t = t,
-        .normal = normalize(rotate(ray->direction / semi_axes, ellipsoid->rotation)),
+        .normal = normalize(rotate(object_normal, ellipsoid->rotation)),
     };
 
-    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes;
     if (dot(object_normal, ray->direction) > 0) {
         intersection.normal = -intersection.normal;
         intersection.inner = true;
@@ -398,11 +399,15 @@ Intersection intersect_box(Primitive *box, Ray *ray)
     }
 
     Vector3 object_normal = (ray->origin + t * ray->direction) / dimensions;
-    for (u32 i = 0; i < 3; i++) {
-        if (fabsf(object_normal[i]) != 1.0f) {
-            object_normal[i] = 0.0f;
+    u32 max_index = 0;
+    for (u32 i = 1; i < 3; i++) {
+        if (fabsf(object_normal[i]) > fabsf(object_normal[max_index])) {
+            max_index = i;
         }
     }
+
+    object_normal[(max_index + 1) % 3] = 0.0f;
+    object_normal[(max_index + 2) % 3] = 0.0f;
 
     Intersection intersection = {
         .t = t,
@@ -419,10 +424,9 @@ Intersection intersect_box(Primitive *box, Ray *ray)
 
 Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **closest, f32 t_max = INFINITY)
 {
-    Intersection intersection = {};
+    Intersection out = {.t = INFINITY};
     *closest = nullptr;
 
-    f32 t_min = INFINITY;
     FOR_EACH(primitives) {
         Quaternion inverse_rotation = conj(it->rotation);
         Ray ray = {
@@ -430,25 +434,36 @@ Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **
             .direction = rotate(world_ray->direction, inverse_rotation),
         };
 
+        Intersection current;
         switch (it->type) {
             case PRIMITIVE_PLANE:
-                intersection = intersect_plane(it, &ray);
+                current = intersect_plane(it, &ray);
                 break;
             case PRIMITIVE_ELLIPSOID:
-                intersection = intersect_ellipsoid(it, &ray);
+                current = intersect_ellipsoid(it, &ray);
                 break;
             case PRIMITIVE_BOX:
-                intersection = intersect_box(it, &ray);
+                current = intersect_box(it, &ray);
                 break;
         }
 
-        if (intersection.t > 0 && intersection.t < t_max && t_min > intersection.t) {
-            t_min = intersection.t;
+        if (current.t > 0 && current.t < out.t && current.t < t_max) {
+            out = current;
             *closest = it;
         }
     }
 
-    return intersection;
+    return out;
+}
+
+Vector3 aces_tonemap(Vector3 x)
+{
+    const Vector3 a = {2.51f, 2.51f, 2.51f};
+    const Vector3 b = {0.03f, 0.03f, 0.03f};
+    const Vector3 c = {2.43f, 2.43f, 2.43f};
+    const Vector3 d = {0.59f, 0.59f, 0.59f};
+    const Vector3 e = {0.14f, 0.14f, 0.14f};
+    return pow(clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f), 1.0f / 2.2f);
 }
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
@@ -464,17 +479,67 @@ void ray_trace(Scene *scene, u8 *pixels)
 
             Ray camera_ray = {
                 .origin = scene->camera.position,
-                .direction = camera_direction,
+                .direction = normalize(camera_direction),
             };
+
+            if (x == 1337 && y == 593) {
+                int k = 1;
+            }
 
             Primitive *closest = nullptr;
             Intersection intersection = intersect(scene->primitives, &camera_ray, &closest);
 
-            if (closest) {
-                pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(closest->color.r);
-                pixels[3 * (x + y * scene->width) + 1] = ROUND_COLOR(closest->color.g);
-                pixels[3 * (x + y * scene->width) + 2] = ROUND_COLOR(closest->color.b);
+            if (!closest) {
+                continue;
             }
+
+            Vector3 intersection_point = camera_ray.origin + intersection.t * camera_ray.direction;
+
+            Vector3 light = scene->ambient_light;
+            switch (closest->surface_type) {
+            case SURFACE_DIFFUSE: {
+                FOR_EACH(scene->lights) {
+                    f32 light_distance = INFINITY;
+
+                    Ray light_ray;
+                    if (it->type == LIGHT_POINT) {
+                        light_ray.direction = it->position - intersection_point;
+                        light_distance = length(light_ray.direction);
+                    } else {
+                        light_ray.direction = it->direction;
+                    }
+                    light_ray.direction = normalize(light_ray.direction);
+
+                    light_ray.origin = intersection_point + 1E-4 * intersection.normal;
+
+                    f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
+                    if (diffuse_coeff < 0) {
+                        continue;
+                    }
+
+                    Primitive *light_closest = nullptr;
+                    intersect(scene->primitives, &light_ray, &light_closest, light_distance);
+
+                    if (!light_closest) {
+                        if (it->type == LIGHT_POINT) {
+                            f32 attenuation = (it->attenuation[0] + it->attenuation[1] * light_distance + it->attenuation[2] * light_distance * light_distance);
+                            light += diffuse_coeff * it->intensity / attenuation;
+                        } else {
+                            light += diffuse_coeff * it->intensity;
+                        }
+                    }
+                }
+            } break;
+            default:
+            break;
+            }
+
+            Vector3 out_color = light * closest->color;
+            out_color = aces_tonemap(out_color);
+
+            pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(out_color.r);
+            pixels[3 * (x + y * scene->width) + 1] = ROUND_COLOR(out_color.g);
+            pixels[3 * (x + y * scene->width) + 2] = ROUND_COLOR(out_color.b);
         }
     }
 }
@@ -515,10 +580,12 @@ int main(int argc, char **argv)
     parse(&parser, &scene);
 
     u8 *pixels = (u8 *) malloc(3 * scene.width * scene.height);
+
+    Vector3 tonemapped_background_color = aces_tonemap(scene.background_color);
     for (u32 i = 0; i < 3 * scene.width * scene.height; i += 3) {
-        pixels[i + 0] = ROUND_COLOR(scene.background_color.r);
-        pixels[i + 1] = ROUND_COLOR(scene.background_color.g);
-        pixels[i + 2] = ROUND_COLOR(scene.background_color.b);
+        pixels[i + 0] = ROUND_COLOR(tonemapped_background_color.r);
+        pixels[i + 1] = ROUND_COLOR(tonemapped_background_color.g);
+        pixels[i + 2] = ROUND_COLOR(tonemapped_background_color.b);
     }
 
     ray_trace(&scene, pixels);

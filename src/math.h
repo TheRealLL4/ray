@@ -100,9 +100,23 @@ static inline Vector3 operator+(Vector3 u, Vector3 v)
     return {u.x + v.x, u.y + v.y, u.z + v.z};
 }
 
+static inline Vector3 &operator+=(Vector3 &u, Vector3 v)
+{
+    u = u + v;
+
+    return u;
+}
+
 static inline Vector3 operator-(Vector3 u, Vector3 v)
 {
     return {u.x - v.x, u.y - v.y, u.z - v.z};
+}
+
+static inline Vector3 &operator-=(Vector3 &u, Vector3 v)
+{
+    u = u - v;
+
+    return u;
 }
 
 static inline Vector3 operator*(Vector3 u, Vector3 v)
@@ -110,9 +124,23 @@ static inline Vector3 operator*(Vector3 u, Vector3 v)
     return {u.x * v.x, u.y * v.y, u.z * v.z};
 }
 
+static inline Vector3 &operator*=(Vector3 &u, Vector3 v)
+{
+    u = u * v;
+
+    return u;
+}
+
 static inline Vector3 operator/(Vector3 u, Vector3 v)
 {
     return {u.x / v.x, u.y / v.y, u.z / v.z};
+}
+
+static inline Vector3 &operator/=(Vector3 &u, Vector3 v)
+{
+    u = u + v;
+
+    return u;
 }
 
 static inline Vector3 operator*(f32 a, Vector3 v)
@@ -120,15 +148,34 @@ static inline Vector3 operator*(f32 a, Vector3 v)
     return {a * v.x, a * v.y, a * v.z};
 }
 
+static inline Vector3 &operator*=(f32 a, Vector3 &v)
+{
+    v = a * v;
+
+    return v;
+}
+
 static inline Vector3 operator/(Vector3 v, f32 a)
 {
     return {v.x / a, v.y / a, v.z / a};
 }
 
+static inline Vector3 &operator/=(Vector3 &v, f32 a)
+{
+    v = v / a;
+
+    return v;
+}
+
+static inline f32 length_sq(Vector3 v)
+{
+    return v.x * v.x + v.y * v.y + v.z * v.z;
+}
+
 static inline f32 length(Vector3 v)
 {
     return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
-};
+}
 
 static inline Vector3 normalize(Vector3 v)
 {
@@ -185,6 +232,24 @@ static inline Vector3 pow(Vector3 v, f32 a)
 static inline Vector3 pow(Vector3 v, Vector3 e)
 {
     return {powf(v.x, e.x), powf(v.y, e.y), powf(v.z, e.z)};
+}
+
+static inline Vector3 clamp(Vector3 v, Vector3 min, Vector3 max)
+{
+    return {
+        CLAMP(v.x, min.x, max.x),
+        CLAMP(v.y, min.y, max.y),
+        CLAMP(v.z, min.z, max.z),
+    };
+}
+
+static inline Vector3 clamp(Vector3 v, f32 min, f32 max)
+{
+    return {
+        CLAMP(v.x, min, max),
+        CLAMP(v.y, min, max),
+        CLAMP(v.z, min, max),
+    };
 }
 
 union Quaternion
