@@ -456,6 +456,75 @@ Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **
     return out;
 }
 
+Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
+{
+    if (depth > scene->ray_depth) {
+        return {};
+    }
+
+    Primitive *closest = nullptr;
+    Intersection intersection = intersect(scene->primitives, ray, &closest);
+
+    if (!closest) {
+        return scene->background_color;
+    }
+
+    Vector3 intersection_point = ray->origin + intersection.t * ray->direction;
+
+    Vector3 light = {};
+    switch (closest->surface_type) {
+    case SURFACE_DIFFUSE: {
+        light += scene->ambient_light;
+        FOR_EACH(scene->lights) {
+            f32 light_distance = INFINITY;
+
+            Ray light_ray;
+            if (it->type == LIGHT_POINT) {
+                light_ray.direction = it->position - intersection_point;
+                light_distance = length(light_ray.direction);
+            } else {
+                light_ray.direction = it->direction;
+            }
+            light_ray.direction = normalize(light_ray.direction);
+
+            light_ray.origin = intersection_point + 1E-4 * light_ray.direction;
+
+            f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
+            if (diffuse_coeff < 0) {
+                continue;
+            }
+
+            Primitive *light_closest = nullptr;
+            intersect(scene->primitives, &light_ray, &light_closest, light_distance);
+
+            if (!light_closest) {
+                if (it->type == LIGHT_POINT) {
+                    f32 attenuation = (it->attenuation[0] + it->attenuation[1] * light_distance + it->attenuation[2] * light_distance * light_distance);
+                    light += diffuse_coeff * it->intensity / attenuation;
+                } else {
+                    light += diffuse_coeff * it->intensity;
+                }
+            }
+        }
+
+        return closest->color * light;
+    } break;
+    case SURFACE_METALLIC: {
+        Ray reflected_ray = {
+            .origin = intersection_point - 1E-4 * ray->direction,
+            .direction = reflect(-ray->direction, intersection.normal),
+        };
+        light += ray_trace(scene, &reflected_ray, depth + 1);
+        return light * closest->color;
+    } break;
+    case SURFACE_DIELECTRIC: {
+        ;
+    } break;
+    }
+
+    return light;
+}
+
 Vector3 aces_tonemap(Vector3 x)
 {
     const Vector3 a = {2.51f, 2.51f, 2.51f};
@@ -467,7 +536,7 @@ Vector3 aces_tonemap(Vector3 x)
 }
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
-void ray_trace(Scene *scene, u8 *pixels)
+void fill_pixels(Scene *scene, u8 *pixels)
 {
     for (u32 y = 0; y < scene->height; y++) {
         for (u32 x = 0; x < scene->width; x++) {
@@ -486,55 +555,7 @@ void ray_trace(Scene *scene, u8 *pixels)
                 int k = 1;
             }
 
-            Primitive *closest = nullptr;
-            Intersection intersection = intersect(scene->primitives, &camera_ray, &closest);
-
-            if (!closest) {
-                continue;
-            }
-
-            Vector3 intersection_point = camera_ray.origin + intersection.t * camera_ray.direction;
-
-            Vector3 light = scene->ambient_light;
-            switch (closest->surface_type) {
-            case SURFACE_DIFFUSE: {
-                FOR_EACH(scene->lights) {
-                    f32 light_distance = INFINITY;
-
-                    Ray light_ray;
-                    if (it->type == LIGHT_POINT) {
-                        light_ray.direction = it->position - intersection_point;
-                        light_distance = length(light_ray.direction);
-                    } else {
-                        light_ray.direction = it->direction;
-                    }
-                    light_ray.direction = normalize(light_ray.direction);
-
-                    light_ray.origin = intersection_point + 1E-4 * light_ray.direction;
-
-                    f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
-                    if (diffuse_coeff < 0) {
-                        continue;
-                    }
-
-                    Primitive *light_closest = nullptr;
-                    intersect(scene->primitives, &light_ray, &light_closest, light_distance);
-
-                    if (!light_closest) {
-                        if (it->type == LIGHT_POINT) {
-                            f32 attenuation = (it->attenuation[0] + it->attenuation[1] * light_distance + it->attenuation[2] * light_distance * light_distance);
-                            light += diffuse_coeff * it->intensity / attenuation;
-                        } else {
-                            light += diffuse_coeff * it->intensity;
-                        }
-                    }
-                }
-            } break;
-            default:
-            break;
-            }
-
-            Vector3 out_color = light * closest->color;
+            Vector3 out_color = ray_trace(scene, &camera_ray, 0);
             out_color = aces_tonemap(out_color);
 
             pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(out_color.r);
@@ -588,7 +609,7 @@ int main(int argc, char **argv)
         pixels[i + 2] = ROUND_COLOR(tonemapped_background_color.b);
     }
 
-    ray_trace(&scene, pixels);
+    fill_pixels(&scene, pixels);
 
     write_ppm(argv[2], scene.width, scene.height, pixels);
 

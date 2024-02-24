@@ -252,6 +252,11 @@ static inline Vector3 clamp(Vector3 v, f32 min, f32 max)
     };
 }
 
+static inline Vector3 reflect(Vector3 u, Vector3 v)
+{
+    return 2.0f * dot(u, v) * v - u;
+}
+
 union Quaternion
 {
     struct
