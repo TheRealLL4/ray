@@ -1,5 +1,15 @@
 #pragma once
 
+static inline f32 square(f32 x)
+{
+    return x * x;
+}
+
+static inline f32 lerp(f32 a, f32 b, f32 t)
+{
+    return t * b + (1 - t) * a;
+}
+
 union Vector2
 {
     struct
@@ -212,6 +222,11 @@ static inline Vector3 max(Vector3 u, Vector3 v)
         MAX(u.y, v.y),
         MAX(u.z, v.z),
     };
+}
+
+static inline Vector3 lerp(Vector3 a, Vector3 b, f32 t)
+{
+    return t * b + (1 - t) * a;
 }
 
 static inline f32 min(Vector3 v)

@@ -471,10 +471,9 @@ Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
 
     Vector3 intersection_point = ray->origin + intersection.t * ray->direction;
 
-    Vector3 light = {};
     switch (closest->surface_type) {
     case SURFACE_DIFFUSE: {
-        light += scene->ambient_light;
+        Vector3 light = scene->ambient_light;
         FOR_EACH(scene->lights) {
             f32 light_distance = INFINITY;
 
@@ -487,7 +486,7 @@ Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
             }
             light_ray.direction = normalize(light_ray.direction);
 
-            light_ray.origin = intersection_point + 1E-4 * light_ray.direction;
+            light_ray.origin = intersection_point + 1E-4 * intersection.normal;
 
             f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
             if (diffuse_coeff < 0) {
@@ -511,18 +510,44 @@ Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
     } break;
     case SURFACE_METALLIC: {
         Ray reflected_ray = {
-            .origin = intersection_point - 1E-4 * ray->direction,
+            .origin = intersection_point + 1E-4 * intersection.normal,
             .direction = reflect(-ray->direction, intersection.normal),
         };
-        light += ray_trace(scene, &reflected_ray, depth + 1);
-        return light * closest->color;
+        Vector3 light = ray_trace(scene, &reflected_ray, depth + 1);
+
+        return closest->color * light;
     } break;
     case SURFACE_DIELECTRIC: {
-        ;
+        Ray reflected_ray = {
+            .origin = intersection_point + 1E-4 * intersection.normal,
+            .direction = reflect(-ray->direction, intersection.normal),
+        };
+        Vector3 reflected_light = ray_trace(scene, &reflected_ray, depth + 1);
+
+        f32 ior_quotient = intersection.inner ? closest->ior : (1.0f / closest->ior);
+        f32 cos_1 = dot(intersection.normal, -ray->direction);
+        f32 sin_2 = ior_quotient * sqrtf(1.0f - cos_1 * cos_1);
+        if (sin_2 <= 1.0f) {
+            f32 cos_2 = sqrtf(1 - sin_2 * sin_2);
+            Ray refracted_ray = {
+                .origin = intersection_point - 1E-4 * intersection.normal,
+                .direction = normalize(ior_quotient * ray->direction + (ior_quotient * cos_1 - cos_2) * intersection.normal),
+            };
+            Vector3 refracted_light = ray_trace(scene, &refracted_ray, depth + 1);
+
+            if (!intersection.inner) {
+                refracted_light *= closest->color;
+            }
+
+            f32 reflection_coefficient = square((ior_quotient - 1) / (ior_quotient + 1));
+            f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1.0f - dot(intersection.normal, -ray->direction), 5.0f);
+
+            return lerp(refracted_light, reflected_light, r);
+        } else {
+            return reflected_light;
+        }
     } break;
     }
-
-    return light;
 }
 
 Vector3 aces_tonemap(Vector3 x)
@@ -551,11 +576,11 @@ void fill_pixels(Scene *scene, u8 *pixels)
                 .direction = normalize(camera_direction),
             };
 
-            if (x == 1337 && y == 593) {
+            if (x == 1282 && y == 487) {
                 int k = 1;
             }
 
-            Vector3 out_color = ray_trace(scene, &camera_ray, 0);
+            Vector3 out_color = ray_trace(scene, &camera_ray, 1);
             out_color = aces_tonemap(out_color);
 
             pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(out_color.r);
