@@ -324,7 +324,7 @@ Intersection intersect_plane(Primitive *plane, Ray *ray)
     Vector3 object_normal = plane->parameters;
 
     Intersection intersection = {
-        .t = (-dot(ray->origin, object_normal) / dot(ray->direction, object_normal)),
+        .t = -dot(ray->origin, object_normal) / dot(ray->direction, object_normal),
         .normal = normalize(rotate(object_normal, plane->rotation)),
     };
 
@@ -341,10 +341,10 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
     Vector3 semi_axes = ellipsoid->parameters;
 
     f32 a = dot(ray->direction / semi_axes, ray->direction / semi_axes);
-    f32 b = 2 * dot(ray->origin / semi_axes, ray->direction / semi_axes);
+    f32 b = 2.0f * dot(ray->origin / semi_axes, ray->direction / semi_axes);
     f32 c = dot(ray->origin / semi_axes, ray->origin / semi_axes) - 1.0f;
 
-    f32 discriminant = b * b - 4 * a * c;
+    f32 discriminant = b * b - 4.0f * a * c;
     if (discriminant < 0) {
         return {.t = -1};
     }
@@ -355,11 +355,13 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
     f32 t = -1;
     if (t_min > 0) {
         t = t_min;
-    } else {
+    } else if (t_max > 0) {
         t = t_max;
+    } else {
+        return {.t = -1};
     }
 
-    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes;
+    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes / semi_axes;
 
     Intersection intersection = {
         .t = t,
@@ -394,8 +396,10 @@ Intersection intersect_box(Primitive *box, Ray *ray)
     f32 t = -1.0f;
     if (interval_min > 0) {
         t = interval_min;
-    } else {
+    } else if (interval_max > 0) {
         t = interval_max;
+    } else {
+        return {.t = -1};
     }
 
     Vector3 object_normal = (ray->origin + t * ray->direction) / dimensions;
@@ -540,7 +544,7 @@ Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
             }
 
             f32 reflection_coefficient = square((ior_quotient - 1) / (ior_quotient + 1));
-            f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1.0f - dot(intersection.normal, -ray->direction), 5.0f);
+            f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1.0f - cos_1, 5.0f);
 
             return lerp(refracted_light, reflected_light, r);
         } else {
@@ -575,10 +579,6 @@ void fill_pixels(Scene *scene, u8 *pixels)
                 .origin = scene->camera.position,
                 .direction = normalize(camera_direction),
             };
-
-            if (x == 1282 && y == 487) {
-                int k = 1;
-            }
 
             Vector3 out_color = ray_trace(scene, &camera_ray, 1);
             out_color = aces_tonemap(out_color);
