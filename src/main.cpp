@@ -1,9 +1,9 @@
-#include <cstdint>
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <cstdarg>
-#include <cmath>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#include <math.h>
 
 #define PRIVATE_NAMESPACE_NAME  ray
 #define PRIVATE_NAMESPACE_BEGIN namespace PRIVATE_NAMESPACE_NAME { namespace {

@@ -15,7 +15,7 @@ typedef double f64;
 
 // Size of static array
 template <typename T, u64 N>
-static inline u64 array_size(T (&array)[N])
+inline u64 array_size(T (&array)[N])
 {
     return N;
 }
@@ -35,7 +35,7 @@ static inline u64 array_size(T (&array)[N])
 #define SWAP(a, b) do { auto tmp = b; b = a; a = tmp; } while(false)
 
 // Logging:
-static inline void log(const char *format, ...)
+inline void log(const char *format, ...)
 {
 #ifdef DEVELOPER
     va_list args;
@@ -55,8 +55,8 @@ static inline void log(const char *format, ...)
     do {                                                                          \
         if (!(condition)) {                                                       \
             log("In %s, defined in %s on line %d:\n"                              \
-                  "Assertion `%s` failed.\n"                                      \
-                  "%s\n", __FUNCTION__, __FILE__, __LINE__, #condition, message); \
+                "Assertion `%s` failed.\n"                                        \
+                "%s\n", __FUNCTION__, __FILE__, __LINE__, #condition, message);   \
             abort();                                                              \
         }                                                                         \
     } while (false)
@@ -106,7 +106,7 @@ struct Array
 #define FOR_EACH(array) for (auto it = (array).data; it != ((array).data + (array).size); it++)
 
 template <typename T>
-static inline void array_maybe_expand(Array<T> *array, u32 to_add)
+inline void array_maybe_expand(Array<T> *array, u32 to_add)
 {
     u32 minimal_capacity = array->size + to_add;
     if (minimal_capacity <= array->capacity) {
@@ -126,27 +126,27 @@ static inline void array_maybe_expand(Array<T> *array, u32 to_add)
 }
 
 template <typename T>
-static inline T array_pop(Array<T> *array)
+inline T array_pop(Array<T> *array)
 {
     assert2(array->size > 0, "Attempted to pop an element from an empty array.");
     return (*array)[--array->size];
 }
 
 template <typename T>
-static inline void array_push(Array<T> *array, T value)
+inline void array_push(Array<T> *array, T value)
 {
     array_maybe_expand(array, 1);
     array->data[array->size++] = value;
 }
 
 template <typename T>
-static inline void array_reserve(Array<T> *array, u32 count)
+inline void array_reserve(Array<T> *array, u32 count)
 {
     array_maybe_expand(array, count);
 }
 
 template <typename T>
-static inline void array_resize(Array<T> *array, u32 new_size)
+inline void array_resize(Array<T> *array, u32 new_size)
 {
     if (new_size > array->size) {
         array_maybe_expand(array, new_size - array->size);
@@ -156,7 +156,7 @@ static inline void array_resize(Array<T> *array, u32 new_size)
 }
 
 template <typename T>
-static inline void array_insert_segment(Array<T> *array, u32 where, u32 how_many)
+inline void array_insert_segment(Array<T> *array, u32 where, u32 how_many)
 {
     array_maybe_expand(array, how_many);
     memmove(array->data + where + how_many, array->data + where, (array->size - where) * sizeof(T));
@@ -164,21 +164,21 @@ static inline void array_insert_segment(Array<T> *array, u32 where, u32 how_many
 }
 
 template <typename T>
-static inline void array_insert(Array<T> *array, T value, u32 where)
+inline void array_insert(Array<T> *array, T value, u32 where)
 {
     array_insert_segment(array, where, 1);
     array->data[where] = value;
 }
 
 template <typename T>
-static inline void array_delete_segment(Array<T> *array, u32 where, u32 how_many)
+inline void array_delete_segment(Array<T> *array, u32 where, u32 how_many)
 {
     memmove(array->data + where, array->data + where + how_many, (array->size - where) * sizeof(T));
     array->size -= how_many;
 }
 
 template <typename T>
-static inline T array_delete(Array<T> *array, u32 index)
+inline T array_delete(Array<T> *array, u32 index)
 {
     T value = array->data[index];
     array_delete_segment(array, index, 1);
@@ -187,13 +187,13 @@ static inline T array_delete(Array<T> *array, u32 index)
 }
 
 template <typename T>
-static inline bool array_is_empty(Array<T> *array)
+inline bool array_is_empty(Array<T> *array)
 {
     return (array->size == 0);
 }
 
 template <typename T>
-static inline void array_free(Array<T> *array)
+inline void array_free(Array<T> *array)
 {
     free(array->data);
     *array = {};
