@@ -1,5 +1,7 @@
 #pragma once
 
+const f32 PI = 3.14159265f;
+
 inline f32 square(f32 x)
 {
     return x * x;

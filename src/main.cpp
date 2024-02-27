@@ -1,9 +1,10 @@
+#include <math.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
-#include <math.h>
+#include <time.h>
 
 #define PRIVATE_NAMESPACE_NAME  ray
 #define PRIVATE_NAMESPACE_BEGIN namespace PRIVATE_NAMESPACE_NAME { namespace {
@@ -13,6 +14,7 @@ PRIVATE_NAMESPACE_BEGIN
 
 #include "basic.h"
 #include "math.h"
+#include "xoroshiro.h"
 
 enum Primitive_Type
 {
@@ -38,30 +40,7 @@ struct Primitive
     Vector3    position = {0, 0, 0};
     Quaternion rotation = {0, 0, 0, 1};
     Vector3    color;
-};
-
-enum Light_Type
-{
-    LIGHT_DIRECTIONAL = 0,
-    LIGHT_POINT       = 1,
-};
-
-struct Light
-{
-    Light_Type type;
-    union
-    {
-        // Directional light
-        Vector3 direction;
-
-        // Point light
-        struct
-        {
-            Vector3 position;
-            Vector3 intensity;
-            Vector3 attenuation;
-        };
-    };
+    Vector3    emission = {0, 0, 0};
 };
 
 struct Scene
@@ -82,8 +61,9 @@ struct Scene
     Array<Primitive> primitives;
 
     u32 ray_depth;
-    Vector3 ambient_light;
-    Array<Light> lights;
+    u32 samples;
+
+    Xoroshiro128 xoroshiro;
 };
 
 struct Ray
@@ -167,6 +147,8 @@ Primitive parse_primitive(Parser *parser)
             primitive.surface_type = SURFACE_DIELECTRIC;
         } else if (advance_if_starts_with(parser, "IOR ")) {
             sscanf(current(parser), "%f", &primitive.ior);
+        } else if (advance_if_starts_with(parser, "EMISSION ")) {
+            SCAN_VECTOR3(parser, primitive.emission);
         } else {
             break;
         }
@@ -175,30 +157,6 @@ Primitive parse_primitive(Parser *parser)
     }
 
     return primitive;
-}
-
-Light parse_light(Parser *parser)
-{
-    Light light;
-    while (parser->cursor < parser->length) {
-        if (advance_if_starts_with(parser, "LIGHT_INTENSITY ")) {
-            SCAN_VECTOR3(parser, light.intensity);
-        } else if (advance_if_starts_with(parser, "LIGHT_DIRECTION ")) {
-            light.type = LIGHT_DIRECTIONAL;
-            SCAN_VECTOR3(parser, light.direction);
-        } else if (advance_if_starts_with(parser, "LIGHT_POSITION ")) {
-            light.type = LIGHT_POINT;
-            SCAN_VECTOR3(parser, light.position);
-        } else if (advance_if_starts_with(parser, "LIGHT_ATTENUATION ")) {
-            SCAN_VECTOR3(parser, light.attenuation);
-        } else {
-            break;
-        }
-
-        skip_to_next_line(parser);
-    }
-
-    return light;
 }
 
 void parse(Parser *parser, Scene *scene)
@@ -223,11 +181,8 @@ void parse(Parser *parser, Scene *scene)
             continue;
         } else if (advance_if_starts_with(parser, "RAY_DEPTH ")) {
             sscanf(current(parser), "%u", &scene->ray_depth);
-        } else if (advance_if_starts_with(parser, "AMBIENT_LIGHT ")) {
-            SCAN_VECTOR3(parser, scene->ambient_light);
-        } else if (advance_if_starts_with(parser, "NEW_LIGHT\n")) {
-            array_push(&scene->lights, parse_light(parser));
-            continue;
+        } else if (advance_if_starts_with(parser, "SAMPLES ")) {
+            sscanf(current(parser), "%u", &scene->samples);
         }
 
         skip_to_next_line(parser);
@@ -319,16 +274,16 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 }
 #endif
 
-Intersection intersect_plane(Primitive *plane, Ray *ray)
+Intersection intersect_plane(Primitive *plane, Ray ray)
 {
     Vector3 object_normal = plane->parameters;
 
     Intersection intersection = {
-        .t = -dot(ray->origin, object_normal) / dot(ray->direction, object_normal),
+        .t = -dot(ray.origin, object_normal) / dot(ray.direction, object_normal),
         .normal = normalize(rotate(object_normal, plane->rotation)),
     };
 
-    if (dot(object_normal, ray->direction) > 0) {
+    if (dot(object_normal, ray.direction) > 0) {
         intersection.normal = -intersection.normal;
         intersection.inner = true;
     }
@@ -336,13 +291,13 @@ Intersection intersect_plane(Primitive *plane, Ray *ray)
     return intersection;
 }
 
-Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
+Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray ray)
 {
     Vector3 semi_axes = ellipsoid->parameters;
 
-    f32 a = dot(ray->direction / semi_axes, ray->direction / semi_axes);
-    f32 b = 2.0f * dot(ray->origin / semi_axes, ray->direction / semi_axes);
-    f32 c = dot(ray->origin / semi_axes, ray->origin / semi_axes) - 1.0f;
+    f32 a = dot(ray.direction / semi_axes, ray.direction / semi_axes);
+    f32 b = 2.0f * dot(ray.origin / semi_axes, ray.direction / semi_axes);
+    f32 c = dot(ray.origin / semi_axes, ray.origin / semi_axes) - 1.0f;
 
     f32 discriminant = b * b - 4.0f * a * c;
     if (discriminant < 0) {
@@ -361,14 +316,14 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
         return {.t = -1};
     }
 
-    Vector3 object_normal = (ray->origin + t * ray->direction) / semi_axes / semi_axes;
+    Vector3 object_normal = (ray.origin + t * ray.direction) / semi_axes / semi_axes;
 
     Intersection intersection = {
         .t = t,
         .normal = normalize(rotate(object_normal, ellipsoid->rotation)),
     };
 
-    if (dot(object_normal, ray->direction) > 0) {
+    if (dot(object_normal, ray.direction) > 0) {
         intersection.normal = -intersection.normal;
         intersection.inner = true;
     }
@@ -376,12 +331,12 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray *ray)
     return intersection;
 }
 
-Intersection intersect_box(Primitive *box, Ray *ray)
+Intersection intersect_box(Primitive *box, Ray ray)
 {
     Vector3 dimensions = box->parameters;
 
-    Vector3 t1 = (-dimensions - ray->origin) / ray->direction;
-    Vector3 t2 = ( dimensions - ray->origin) / ray->direction;
+    Vector3 t1 = (-dimensions - ray.origin) / ray.direction;
+    Vector3 t2 = ( dimensions - ray.origin) / ray.direction;
 
     Vector3 t_min = min(t1, t2);
     Vector3 t_max = max(t1, t2);
@@ -402,7 +357,7 @@ Intersection intersect_box(Primitive *box, Ray *ray)
         return {.t = -1};
     }
 
-    Vector3 object_normal = (ray->origin + t * ray->direction) / dimensions;
+    Vector3 object_normal = (ray.origin + t * ray.direction) / dimensions;
     u32 max_index = 0;
     for (u32 i = 1; i < 3; i++) {
         if (fabsf(object_normal[i]) > fabsf(object_normal[max_index])) {
@@ -418,7 +373,7 @@ Intersection intersect_box(Primitive *box, Ray *ray)
         .normal = normalize(rotate(object_normal, box->rotation)),
     };
 
-    if (dot(ray->direction, object_normal) > 0) {
+    if (dot(ray.direction, object_normal) > 0) {
         intersection.normal = -intersection.normal;
         intersection.inner = true;
     }
@@ -426,7 +381,7 @@ Intersection intersect_box(Primitive *box, Ray *ray)
     return intersection;
 }
 
-Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **closest, f32 t_max = INFINITY)
+Intersection intersect(Array<Primitive> primitives, Ray world_ray, Primitive **closest, f32 t_max = INFINITY)
 {
     Intersection out = {.t = INFINITY};
     *closest = nullptr;
@@ -434,20 +389,20 @@ Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **
     FOR_EACH(primitives) {
         Quaternion inverse_rotation = conj(it->rotation);
         Ray ray = {
-            .origin = rotate(world_ray->origin - it->position, inverse_rotation),
-            .direction = rotate(world_ray->direction, inverse_rotation),
+            .origin = rotate(world_ray.origin - it->position, inverse_rotation),
+            .direction = rotate(world_ray.direction, inverse_rotation),
         };
 
         Intersection current;
         switch (it->type) {
             case PRIMITIVE_PLANE:
-                current = intersect_plane(it, &ray);
+                current = intersect_plane(it, ray);
                 break;
             case PRIMITIVE_ELLIPSOID:
-                current = intersect_ellipsoid(it, &ray);
+                current = intersect_ellipsoid(it, ray);
                 break;
             case PRIMITIVE_BOX:
-                current = intersect_box(it, &ray);
+                current = intersect_box(it, ray);
                 break;
         }
 
@@ -460,7 +415,21 @@ Intersection intersect(Array<Primitive> primitives, Ray *world_ray, Primitive **
     return out;
 }
 
-Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
+Vector3 semi_sphere_rand(Vector2 unit_square_point, Vector3 normal)
+{
+    f32 theta = 2.0f * PI * unit_square_point.x;
+    f32 z = unit_square_point.y;
+    f32 h = sqrtf(1.0f - z * z);
+    Vector3 w = {h * cosf(theta), h * sinf(theta), z};
+
+    if (dot(normal, w) < 0) {
+        w = -w;
+    }
+
+    return w;
+}
+
+Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
 {
     if (depth > scene->ray_depth) {
         return {};
@@ -473,83 +442,61 @@ Vector3 ray_trace(Scene *scene, Ray *ray, u32 depth)
         return scene->background_color;
     }
 
-    Vector3 intersection_point = ray->origin + intersection.t * ray->direction;
+    Vector3 intersection_point = ray.origin + intersection.t * ray.direction;
 
     switch (closest->surface_type) {
     case SURFACE_DIFFUSE: {
-        Vector3 light = scene->ambient_light;
-        FOR_EACH(scene->lights) {
-            f32 light_distance = INFINITY;
+        Vector3 direction = semi_sphere_rand({xoroshiro_next_f32(&scene->xoroshiro), xoroshiro_next_f32(&scene->xoroshiro)}, intersection.normal);
+        Vector3 light = ray_trace(scene, {intersection_point + 1E-4 * intersection.normal, direction}, depth + 1);
 
-            Ray light_ray;
-            if (it->type == LIGHT_POINT) {
-                light_ray.direction = it->position - intersection_point;
-                light_distance = length(light_ray.direction);
-            } else {
-                light_ray.direction = it->direction;
-            }
-            light_ray.direction = normalize(light_ray.direction);
-
-            light_ray.origin = intersection_point + 1E-4 * intersection.normal;
-
-            f32 diffuse_coeff = dot(light_ray.direction, intersection.normal);
-            if (diffuse_coeff < 0) {
-                continue;
-            }
-
-            Primitive *light_closest = nullptr;
-            intersect(scene->primitives, &light_ray, &light_closest, light_distance);
-
-            if (!light_closest) {
-                if (it->type == LIGHT_POINT) {
-                    f32 attenuation = (it->attenuation[0] + it->attenuation[1] * light_distance + it->attenuation[2] * light_distance * light_distance);
-                    light += diffuse_coeff * it->intensity / attenuation;
-                } else {
-                    light += diffuse_coeff * it->intensity;
-                }
-            }
-        }
-
-        return closest->color * light;
+        return closest->emission + (2.0f * dot(direction, intersection.normal) * light) * closest->color;
     } break;
     case SURFACE_METALLIC: {
         Ray reflected_ray = {
             .origin = intersection_point + 1E-4 * intersection.normal,
-            .direction = reflect(-ray->direction, intersection.normal),
+            .direction = reflect(-ray.direction, intersection.normal),
         };
-        Vector3 light = ray_trace(scene, &reflected_ray, depth + 1);
+        Vector3 light = ray_trace(scene, reflected_ray, depth + 1);
 
-        return closest->color * light;
+        return closest->emission + light * closest->color;
     } break;
     case SURFACE_DIELECTRIC: {
+        Vector3 light = {};
+
         Ray reflected_ray = {
             .origin = intersection_point + 1E-4 * intersection.normal,
-            .direction = reflect(-ray->direction, intersection.normal),
+            .direction = reflect(-ray.direction, intersection.normal),
         };
-        Vector3 reflected_light = ray_trace(scene, &reflected_ray, depth + 1);
+        Vector3 reflected_light = ray_trace(scene, reflected_ray, depth + 1);
 
         f32 ior_quotient = intersection.inner ? closest->ior : (1.0f / closest->ior);
-        f32 cos_1 = dot(intersection.normal, -ray->direction);
+        f32 cos_1 = dot(intersection.normal, -ray.direction);
         f32 sin_2 = ior_quotient * sqrtf(1.0f - cos_1 * cos_1);
         if (sin_2 <= 1.0f) {
-            f32 cos_2 = sqrtf(1 - sin_2 * sin_2);
-            Ray refracted_ray = {
-                .origin = intersection_point - 1E-4 * intersection.normal,
-                .direction = normalize(ior_quotient * ray->direction + (ior_quotient * cos_1 - cos_2) * intersection.normal),
-            };
-            Vector3 refracted_light = ray_trace(scene, &refracted_ray, depth + 1);
-
-            if (!intersection.inner) {
-                refracted_light *= closest->color;
-            }
-
             f32 reflection_coefficient = square((ior_quotient - 1) / (ior_quotient + 1));
             f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1.0f - cos_1, 5.0f);
+            f32 random_number_in_unit_inverval = xoroshiro_next_f32(&scene->xoroshiro);
+            if (random_number_in_unit_inverval < r) {
+                light = reflected_light;
+            } else {
+                f32 cos_2 = sqrtf(1 - sin_2 * sin_2);
+                Ray refracted_ray = {
+                    .origin = intersection_point - 1E-4 * intersection.normal,
+                    .direction = normalize(ior_quotient * ray.direction + (ior_quotient * cos_1 - cos_2) * intersection.normal),
+                };
+                Vector3 refracted_light = ray_trace(scene, refracted_ray, depth + 1);
 
-            return lerp(refracted_light, reflected_light, r);
+                if (!intersection.inner) {
+                    refracted_light *= closest->color;
+                }
+
+                light = refracted_light;
+            }
         } else {
-            return reflected_light;
+            light = reflected_light;
         }
+
+        return closest->emission + light;
     } break;
     }
 }
@@ -561,6 +508,7 @@ Vector3 aces_tonemap(Vector3 x)
     const Vector3 c = {2.43f, 2.43f, 2.43f};
     const Vector3 d = {0.59f, 0.59f, 0.59f};
     const Vector3 e = {0.14f, 0.14f, 0.14f};
+
     return pow(clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f), 1.0f / 2.2f);
 }
 
@@ -571,16 +519,25 @@ void fill_pixels(Scene *scene, u8 *pixels)
         for (u32 x = 0; x < scene->width; x++) {
             f32 tan_half_fov_x = tanf(scene->camera.fov_x_radians / 2);
             f32 tan_half_fov_y = (scene->height * tan_half_fov_x) / scene->width;
-            f32 normalized_x =  (2 * (x + 0.5f) / scene->width  - 1) * tan_half_fov_x;
-            f32 normalized_y = -(2 * (y + 0.5f) / scene->height - 1) * tan_half_fov_y;
-            Vector3 camera_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
 
-            Ray camera_ray = {
-                .origin = scene->camera.position,
-                .direction = normalize(camera_direction),
-            };
+            Vector3 out_color = {};
+            for (u32 i = 0; i < scene->samples; i++) {
+                f32 offset_x = xoroshiro_next_f32(&scene->xoroshiro);
+                f32 offset_y = xoroshiro_next_f32(&scene->xoroshiro);
 
-            Vector3 out_color = ray_trace(scene, &camera_ray, 1);
+                f32 normalized_x =  (2 * (x + offset_x) / scene->width  - 1) * tan_half_fov_x;
+                f32 normalized_y = -(2 * (y + offset_y) / scene->height - 1) * tan_half_fov_y;
+                Vector3 camera_direction = normalized_x * scene->camera.right + normalized_y * scene->camera.up + 1.0f * scene->camera.forward;
+
+                Ray camera_ray = {
+                    .origin = scene->camera.position,
+                    .direction = normalize(camera_direction),
+                };
+
+                out_color += ray_trace(scene, camera_ray, 1);
+            }
+
+            out_color /= scene->samples;
             out_color = aces_tonemap(out_color);
 
             pixels[3 * (x + y * scene->width) + 0] = ROUND_COLOR(out_color.r);
@@ -622,6 +579,7 @@ int main(int argc, char **argv)
     fclose(file);
 
     Scene scene = {};
+    xoroshiro_set_seed(&scene.xoroshiro, time(nullptr));
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
 
