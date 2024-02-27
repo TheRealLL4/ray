@@ -26,7 +26,7 @@ inline void xoroshiro_set_seed(Xoroshiro128 *xoroshiro, u64 value)
     l = l ^ (l >> 31);
     h = h ^ (h >> 31);
 
-    xoroshiro->low = l;
+    xoroshiro->low  = l;
     xoroshiro->high = h;
 }
 
@@ -43,7 +43,7 @@ inline u64 xoroshiro_next_u64(Xoroshiro128 *xoroshiro)
     return n;
 }
 
-inline s32 xoroshiro_next_s32(Xoroshiro128 *xoroshiro, u32 n)
+inline u32 xoroshiro_next_u32(Xoroshiro128 *xoroshiro, u32 n)
 {
     u64 r = (xoroshiro_next_u64(xoroshiro) & 0xFFFFFFFF) * n;
     if (((u32) r) < n) {
@@ -57,5 +57,6 @@ inline s32 xoroshiro_next_s32(Xoroshiro128 *xoroshiro, u32 n)
 
 inline f32 xoroshiro_next_f32(Xoroshiro128 *xoroshiro)
 {
-    return (xoroshiro_next_u64(xoroshiro) >> (64-24)) * 5.9504645E-8;
+    return (xoroshiro_next_u64(xoroshiro) >> (64-24)) * 5.9604644775390625E-8f;
 }
+

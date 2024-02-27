@@ -503,13 +503,13 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
 
 Vector3 aces_tonemap(Vector3 x)
 {
-    const Vector3 a = {2.51f, 2.51f, 2.51f};
-    const Vector3 b = {0.03f, 0.03f, 0.03f};
-    const Vector3 c = {2.43f, 2.43f, 2.43f};
-    const Vector3 d = {0.59f, 0.59f, 0.59f};
-    const Vector3 e = {0.14f, 0.14f, 0.14f};
+    const Vector3 A = {2.51f, 2.51f, 2.51f};
+    const Vector3 B = {0.03f, 0.03f, 0.03f};
+    const Vector3 C = {2.43f, 2.43f, 2.43f};
+    const Vector3 D = {0.59f, 0.59f, 0.59f};
+    const Vector3 E = {0.14f, 0.14f, 0.14f};
 
-    return pow(clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f), 1.0f / 2.2f);
+    return pow(clamp((x * (A * x + B)) / (x * (C * x + D) + E), 0.0f, 1.0f), 1.0f / 2.2f);
 }
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
@@ -580,6 +580,7 @@ int main(int argc, char **argv)
 
     Scene scene = {};
     xoroshiro_set_seed(&scene.xoroshiro, time(nullptr));
+
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
 
