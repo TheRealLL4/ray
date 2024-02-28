@@ -305,7 +305,8 @@ inline Quaternion conj(Quaternion q)
 
 inline Vector3 rotate(Vector3 v, Quaternion q)
 {
-    Quaternion u = {v, 0.0f};
-    return (q * u * conj(q)).v;
+    Vector3 t = 2.0f * cross(q.v, v);
+
+    return v + q.w * t + cross(q.v, t);
 }
 
