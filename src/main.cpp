@@ -598,16 +598,16 @@ choose_light_that_is_not_a_plane:
             pdf = cosine_pdf(light_ray.direction, intersection.normal);
         } else {
             pdf = cosine_pdf(light_ray.direction, intersection.normal) / 2;
-            // This is actually a hack since in some cases light_pdf will amount to zero
-            // even for the chosen_light, which indicates that light_pdf is probably buggy.
-            // It just happens to give the correct result because of diffuse surfaces' BRDF.
-            if (pdf == 0) {
-                return closest->emission;
-            }
-
             for (u32 i = 0; i < scene->num_lights; i++) {
                 pdf += light_pdf(&scene->primitives[i], light_ray) / (2.0f * scene->num_lights);
             }
+        }
+
+        // This is actually a hack since in some cases light_pdf will amount to zero
+        // even for the chosen_light, which indicates that light_pdf is probably buggy.
+        // It just happens to produce the correct result because of diffuse surfaces' BRDF.
+        if (pdf == 0) {
+            return closest->emission;
         }
 
         Vector3 light = ray_trace(scene, light_ray, depth + 1);
