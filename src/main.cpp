@@ -64,6 +64,8 @@ struct Scene
     u32 samples;
 
     Xoroshiro128 xoroshiro;
+
+    u32 num_lights = 0;
 };
 
 struct Ray
@@ -73,8 +75,8 @@ struct Ray
 
 struct Intersection
 {
-    f32 t;
-    Vector3 normal;
+    f32 t, t_other;
+    Vector3 normal, normal_other;
     bool inner;
 };
 
@@ -308,8 +310,10 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray ray)
     f32 t_max = (-b + sqrtf(discriminant)) / (2 * a);
 
     f32 t = -1;
+    f32 t_other = -1;
     if (t_min > 0) {
         t = t_min;
+        t_other = t_max;
     } else if (t_max > 0) {
         t = t_max;
     } else {
@@ -322,6 +326,13 @@ Intersection intersect_ellipsoid(Primitive *ellipsoid, Ray ray)
         .t = t,
         .normal = normalize(rotate(object_normal, ellipsoid->rotation)),
     };
+
+    if (t_other > 0) {
+        intersection.t_other = t_other;
+
+        Vector3 object_normal_other = (ray.origin + t_other * ray.direction) / semi_axes / semi_axes;
+        intersection.normal_other = normalize(rotate(object_normal_other, ellipsoid->rotation));
+    }
 
     if (dot(object_normal, ray.direction) > 0) {
         intersection.normal = -intersection.normal;
@@ -349,8 +360,10 @@ Intersection intersect_box(Primitive *box, Ray ray)
     }
 
     f32 t = -1.0f;
+    f32 t_other = -1.0f;
     if (interval_min > 0) {
         t = interval_min;
+        t_other = interval_max;
     } else if (interval_max > 0) {
         t = interval_max;
     } else {
@@ -373,6 +386,23 @@ Intersection intersect_box(Primitive *box, Ray ray)
         .normal = normalize(rotate(object_normal, box->rotation)),
     };
 
+    if (t_other > 0) {
+        intersection.t_other = t_other;
+
+        Vector3 object_normal_other = (ray.origin + t_other * ray.direction) / dimensions;
+        u32 max_index = 0;
+        for (u32 i = 1; i < 3; i++) {
+            if (fabsf(object_normal_other[i]) > fabsf(object_normal_other[max_index])) {
+                max_index = i;
+            }
+        }
+
+        object_normal_other[(max_index + 1) % 3] = 0.0f;
+        object_normal_other[(max_index + 2) % 3] = 0.0f;
+
+        intersection.normal_other = normalize(rotate(object_normal_other, box->rotation));
+    }
+
     if (dot(ray.direction, object_normal) > 0) {
         intersection.normal = -intersection.normal;
         intersection.inner = true;
@@ -381,31 +411,37 @@ Intersection intersect_box(Primitive *box, Ray ray)
     return intersection;
 }
 
+Intersection intersect_once(Primitive *primitive, Ray world_ray)
+{
+    Quaternion inverse_rotation = conj(primitive->rotation);
+    Ray ray = {
+        .origin = rotate(world_ray.origin - primitive->position, inverse_rotation),
+        .direction = rotate(world_ray.direction, inverse_rotation),
+    };
+
+    Intersection current;
+    switch (primitive->type) {
+        case PRIMITIVE_PLANE:
+            current = intersect_plane(primitive, ray);
+            break;
+        case PRIMITIVE_ELLIPSOID:
+            current = intersect_ellipsoid(primitive, ray);
+            break;
+        case PRIMITIVE_BOX:
+            current = intersect_box(primitive, ray);
+            break;
+    }
+
+    return current;
+}
+
 Intersection intersect(Array<Primitive> primitives, Ray world_ray, Primitive **closest, f32 t_max = INFINITY)
 {
     Intersection out = {.t = INFINITY};
     *closest = nullptr;
 
     FOR_EACH(primitives) {
-        Quaternion inverse_rotation = conj(it->rotation);
-        Ray ray = {
-            .origin = rotate(world_ray.origin - it->position, inverse_rotation),
-            .direction = rotate(world_ray.direction, inverse_rotation),
-        };
-
-        Intersection current;
-        switch (it->type) {
-            case PRIMITIVE_PLANE:
-                current = intersect_plane(it, ray);
-                break;
-            case PRIMITIVE_ELLIPSOID:
-                current = intersect_ellipsoid(it, ray);
-                break;
-            case PRIMITIVE_BOX:
-                current = intersect_box(it, ray);
-                break;
-        }
-
+        Intersection current = intersect_once(it, world_ray);
         if (current.t > 0 && current.t < out.t && current.t < t_max) {
             out = current;
             *closest = it;
@@ -415,18 +451,102 @@ Intersection intersect(Array<Primitive> primitives, Ray world_ray, Primitive **c
     return out;
 }
 
-Vector3 semi_sphere_rand(Vector2 unit_square_point, Vector3 normal)
+Vector3 uniform_unit_sphere(Xoroshiro128 *xoroshiro)
 {
-    f32 theta = 2.0f * PI * unit_square_point.x;
-    f32 z = unit_square_point.y;
+    f32 theta = 2.0f * PI * xoroshiro_next_f32(xoroshiro);
+    f32 z = 2.0f * xoroshiro_next_f32(xoroshiro) - 1.0f;
     f32 h = sqrtf(1.0f - z * z);
-    Vector3 w = {h * cosf(theta), h * sinf(theta), z};
 
-    if (dot(normal, w) < 0) {
-        w = -w;
+    return {h * cosf(theta), h * sinf(theta), z};
+}
+
+Vector3 cosine_weighted(Xoroshiro128 *xoroshiro, Vector3 normal)
+{
+    Vector3 v = uniform_unit_sphere(xoroshiro);
+
+    return normalize(v + normal);
+}
+
+f32 cosine_pdf(Vector3 w, Vector3 normal)
+{
+    return MAX(0.0f, dot(w, normal) / PI);
+}
+
+Vector3 uniform_box(Xoroshiro128 *xoroshiro, Primitive *box)
+{
+    Vector3 dimensions = box->parameters;
+
+    Vector3 weights = {
+        4 * dimensions.y * dimensions.z,
+        4 * dimensions.x * dimensions.z,
+        4 * dimensions.x * dimensions.y
+    };
+    f32 w = weights.x + weights.y + weights.z;
+
+    f32 random_u = 2 * xoroshiro_next_f32(xoroshiro) - 1;
+    f32 random_v = 2 * xoroshiro_next_f32(xoroshiro) - 1;
+
+    f32 sign = xoroshiro_next_u32(xoroshiro, 1) ? 1 : -1;
+
+    Vector3 point;
+    f32 random_number = w * xoroshiro_next_f32(xoroshiro);
+    if (random_number < weights.x) {
+        point = {sign, random_u, random_v};
+    } else if (random_number >= weights.x && random_number < weights.x + weights.y) {
+        point = {random_u, sign, random_v};
+    } else {
+        point = {random_u, random_v, sign};
     }
 
-    return w;
+    return box->position + rotate(dimensions * point, box->rotation);
+}
+
+f32 box_pdf(Primitive *box)
+{
+    Vector3 dimensions = box->parameters;
+
+    return 1.0f / (8.0f * (dimensions.y * dimensions.z + dimensions.x * dimensions.z + dimensions.x * dimensions.y));
+}
+
+Vector3 nonuniform_ellipsoid(Xoroshiro128 *xoroshiro, Primitive *ellipsoid)
+{
+    return ellipsoid->position + rotate(uniform_unit_sphere(xoroshiro) * ellipsoid->parameters, ellipsoid->rotation);
+}
+
+f32 ellipsoid_pdf(Vector3 p, Primitive *ellipsoid)
+{
+    Vector3 r = ellipsoid->parameters;
+    Vector3 n = rotate(p - ellipsoid->position, conj(ellipsoid->rotation))/ r;
+
+    return 1.0f / (4 * PI * sqrtf(n.x*n.x*r.y*r.y*r.z*r.z + r.x*r.x*n.y*n.y*r.z*r.z + r.x*r.x*r.y*r.y*n.z*n.z));
+}
+
+f32 light_pdf(Primitive *light, Ray ray)
+{
+    Intersection intersection = intersect_once(light, ray);
+    f32 pdf = 0.0f;
+    switch (light->type) {
+    case PRIMITIVE_BOX:
+        if (intersection.t > 0) {
+            pdf += box_pdf(light) * intersection.t * intersection.t / fabsf(dot(ray.direction, intersection.normal));
+            if (intersection.t_other > 0) {
+                pdf += box_pdf(light) * intersection.t_other * intersection.t_other / fabsf(dot(ray.direction, intersection.normal_other));
+            }
+        }
+        break;
+    case PRIMITIVE_ELLIPSOID:
+        if (intersection.t > 0) {
+            pdf += ellipsoid_pdf(ray.origin + intersection.t * ray.direction, light) * intersection.t * intersection.t / fabsf(dot(ray.direction, intersection.normal));
+            if (intersection.t_other > 0) {
+                pdf += ellipsoid_pdf(ray.origin + intersection.t_other * ray.direction, light) * intersection.t_other * intersection.t_other / fabsf(dot(ray.direction, intersection.normal_other));
+            }
+        }
+        break;
+    default:
+        break;
+    }
+
+    return pdf;
 }
 
 Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
@@ -444,16 +564,49 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
 
     Vector3 intersection_point = ray.origin + intersection.t * ray.direction;
 
+    Xoroshiro128 *xoroshiro = &scene->xoroshiro;
     switch (closest->surface_type) {
     case SURFACE_DIFFUSE: {
-        Vector3 direction = semi_sphere_rand({xoroshiro_next_f32(&scene->xoroshiro), xoroshiro_next_f32(&scene->xoroshiro)}, intersection.normal);
-        Vector3 light = ray_trace(scene, {intersection_point + 1E-4 * intersection.normal, direction}, depth + 1);
+        Ray light_ray = {.origin = intersection_point + 1e-4 * intersection.normal};
+        if (xoroshiro_next_u32(xoroshiro, 1) || scene->num_lights == 0) {
+            light_ray.direction = cosine_weighted(xoroshiro, intersection.normal);
+        } else {
+choose_light_that_is_not_a_plane:
+            u32 light_index = xoroshiro_next_u32(xoroshiro, scene->num_lights - 1);
+            Primitive *chosen_light = &scene->primitives[light_index];
 
-        return closest->emission + (2.0f * dot(direction, intersection.normal) * light) * closest->color;
+            Vector3 light_surface_point;
+            switch (chosen_light->type) {
+            case PRIMITIVE_BOX:
+                light_surface_point = uniform_box(xoroshiro, chosen_light);
+                break;
+            case PRIMITIVE_ELLIPSOID:
+                light_surface_point = nonuniform_ellipsoid(xoroshiro, chosen_light);
+                break;
+            case PRIMITIVE_PLANE:
+                goto choose_light_that_is_not_a_plane;
+            }
+
+            light_ray.direction = normalize(light_surface_point - light_ray.origin);
+        }
+
+        f32 pdf;
+        if (scene->num_lights == 0) {
+            pdf = cosine_pdf(light_ray.direction, intersection.normal);
+        } else {
+            pdf = cosine_pdf(light_ray.direction, intersection.normal) / 2;
+            for (u32 i = 0; i < scene->num_lights; i++) {
+                pdf += light_pdf(&scene->primitives[i], light_ray) / (2.0f * scene->num_lights);
+            }
+        }
+
+        Vector3 light = ray_trace(scene, light_ray, depth + 1);
+
+        return closest->emission + MAX(dot(light_ray.direction, intersection.normal), 0) * (closest->color / PI) * light / pdf;
     } break;
     case SURFACE_METALLIC: {
         Ray reflected_ray = {
-            .origin = intersection_point + 1E-4 * intersection.normal,
+            .origin = intersection_point + 1e-4 * intersection.normal,
             .direction = reflect(-ray.direction, intersection.normal),
         };
         Vector3 light = ray_trace(scene, reflected_ray, depth + 1);
@@ -464,24 +617,24 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
         Vector3 light = {};
 
         Ray reflected_ray = {
-            .origin = intersection_point + 1E-4 * intersection.normal,
+            .origin = intersection_point + 1e-4 * intersection.normal,
             .direction = reflect(-ray.direction, intersection.normal),
         };
         Vector3 reflected_light = ray_trace(scene, reflected_ray, depth + 1);
 
-        f32 ior_quotient = intersection.inner ? closest->ior : (1.0f / closest->ior);
+        f32 ior_quotient = intersection.inner ? closest->ior : (1 / closest->ior);
         f32 cos_1 = dot(intersection.normal, -ray.direction);
-        f32 sin_2 = ior_quotient * sqrtf(1.0f - cos_1 * cos_1);
-        if (sin_2 <= 1.0f) {
+        f32 sin_2 = ior_quotient * sqrtf(1 - cos_1 * cos_1);
+        if (sin_2 <= 1) {
             f32 reflection_coefficient = square((ior_quotient - 1) / (ior_quotient + 1));
-            f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1.0f - cos_1, 5.0f);
-            f32 random_number_in_unit_inverval = xoroshiro_next_f32(&scene->xoroshiro);
+            f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1 - cos_1, 5.0f);
+            f32 random_number_in_unit_inverval = xoroshiro_next_f32(xoroshiro);
             if (random_number_in_unit_inverval < r) {
                 light = reflected_light;
             } else {
                 f32 cos_2 = sqrtf(1 - sin_2 * sin_2);
                 Ray refracted_ray = {
-                    .origin = intersection_point - 1E-4 * intersection.normal,
+                    .origin = intersection_point - 1e-4 * intersection.normal,
                     .direction = normalize(ior_quotient * ray.direction + (ior_quotient * cos_1 - cos_2) * intersection.normal),
                 };
                 Vector3 refracted_light = ray_trace(scene, refracted_ray, depth + 1);
@@ -583,6 +736,27 @@ int main(int argc, char **argv)
 
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
+
+    auto compare_primitives_by_emission = [] (const void *a, const void *b) -> int
+    {
+        f32 diff = length_sq(((Primitive *)b)->emission) - length_sq(((Primitive *)a)->emission);
+        if (diff == 0) {
+            return 0;
+        } else if (diff < 0) {
+            return -1;
+        } else {
+            return 1;
+        }
+    };
+    qsort(scene.primitives.data, scene.primitives.size, sizeof(Primitive), compare_primitives_by_emission);
+
+    scene.num_lights = scene.primitives.size;
+    for (u32 i = 0; i < scene.primitives.size; i++) {
+        if (length_sq(scene.primitives[i].emission) == 0) {
+            scene.num_lights = i;
+            break;
+        }
+    }
 
     u8 *pixels = (u8 *) malloc(3 * scene.width * scene.height);
 

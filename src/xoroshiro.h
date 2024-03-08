@@ -43,8 +43,10 @@ inline u64 xoroshiro_next_u64(Xoroshiro128 *xoroshiro)
     return n;
 }
 
+// Generates random numbers in [0, n]
 inline u32 xoroshiro_next_u32(Xoroshiro128 *xoroshiro, u32 n)
 {
+    n++;
     u64 r = (xoroshiro_next_u64(xoroshiro) & 0xFFFFFFFF) * n;
     if (((u32) r) < n) {
         while (((u32) r) < (~n + 1) % n) {
