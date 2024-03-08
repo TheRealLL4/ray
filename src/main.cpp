@@ -516,7 +516,7 @@ Vector3 nonuniform_ellipsoid(Xoroshiro128 *xoroshiro, Primitive *ellipsoid)
 f32 ellipsoid_pdf(Vector3 p, Primitive *ellipsoid)
 {
     Vector3 r = ellipsoid->parameters;
-    Vector3 n = rotate(p - ellipsoid->position, conj(ellipsoid->rotation))/ r;
+    Vector3 n = rotate(p - ellipsoid->position, conj(ellipsoid->rotation)) / r;
 
     return 1.0f / (4 * PI * sqrtf(n.x*n.x*r.y*r.y*r.z*r.z + r.x*r.x*n.y*n.y*r.z*r.z + r.x*r.x*r.y*r.y*n.z*n.z));
 }
@@ -690,10 +690,6 @@ void fill_pixels(Scene *scene, u8 *pixels)
                     .origin = scene->camera.position,
                     .direction = normalize(camera_direction),
                 };
-
-                if (x == 0 && y == 26 && i == 35) {
-                    int k = 1;
-                }
 
                 out_color += ray_trace(scene, camera_ray, 1);
             }
