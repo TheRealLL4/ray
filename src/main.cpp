@@ -590,11 +590,15 @@ choose_light_that_is_not_a_plane:
             light_ray.direction = normalize(light_surface_point - light_ray.origin);
         }
 
-        f32 pdf;
+        f32 pdf = 0.0f;
         if (scene->num_lights == 0) {
             pdf = cosine_pdf(light_ray.direction, intersection.normal);
         } else {
             pdf = cosine_pdf(light_ray.direction, intersection.normal) / 2;
+            if (pdf == 0) {
+                return closest->emission;
+            }
+
             for (u32 i = 0; i < scene->num_lights; i++) {
                 pdf += light_pdf(&scene->primitives[i], light_ray) / (2.0f * scene->num_lights);
             }
@@ -687,6 +691,10 @@ void fill_pixels(Scene *scene, u8 *pixels)
                     .direction = normalize(camera_direction),
                 };
 
+                if (x == 0 && y == 26 && i == 35) {
+                    int k = 1;
+                }
+
                 out_color += ray_trace(scene, camera_ray, 1);
             }
 
@@ -732,7 +740,7 @@ int main(int argc, char **argv)
     fclose(file);
 
     Scene scene = {};
-    xoroshiro_set_seed(&scene.xoroshiro, time(nullptr));
+    xoroshiro_set_seed(&scene.xoroshiro, 0xDEADBEEF);
 
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
