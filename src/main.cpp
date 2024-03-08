@@ -568,9 +568,12 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
     switch (closest->surface_type) {
     case SURFACE_DIFFUSE: {
         Ray light_ray = {.origin = intersection_point + 1e-4 * intersection.normal};
+        // In the num_lights == 0 case (the only source is scene->background_color)
+        // use the cosine weighted distribution.
         if (xoroshiro_next_u32(xoroshiro, 1) || scene->num_lights == 0) {
             light_ray.direction = cosine_weighted(xoroshiro, intersection.normal);
         } else {
+            // TODO: What should we do if the only light source is a plane?
 choose_light_that_is_not_a_plane:
             u32 light_index = xoroshiro_next_u32(xoroshiro, scene->num_lights - 1);
             Primitive *chosen_light = &scene->primitives[light_index];
@@ -595,6 +598,9 @@ choose_light_that_is_not_a_plane:
             pdf = cosine_pdf(light_ray.direction, intersection.normal);
         } else {
             pdf = cosine_pdf(light_ray.direction, intersection.normal) / 2;
+            // This is actually a hack since in some cases light_pdf will amount to zero
+            // even for the chosen_light, which indicates that light_pdf is probably buggy.
+            // It just happens to give the correct result because of diffuse surfaces' BRDF.
             if (pdf == 0) {
                 return closest->emission;
             }
@@ -606,7 +612,7 @@ choose_light_that_is_not_a_plane:
 
         Vector3 light = ray_trace(scene, light_ray, depth + 1);
 
-        return closest->emission + MAX(dot(light_ray.direction, intersection.normal), 0) * (closest->color / PI) * light / pdf;
+        return closest->emission + dot(light_ray.direction, intersection.normal) * (closest->color / PI) * light / pdf;
     } break;
     case SURFACE_METALLIC: {
         Ray reflected_ray = {
@@ -741,6 +747,9 @@ int main(int argc, char **argv)
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
 
+    // Sort the primitives by emission in descending order so that later we can
+    // effectively traverse all lights as they would be the first scene.num_lights
+    // elements of the scene.primitives array.
     auto compare_primitives_by_emission = [] (const void *a, const void *b) -> int
     {
         f32 diff = length_sq(((Primitive *)b)->emission) - length_sq(((Primitive *)a)->emission);
@@ -754,6 +763,7 @@ int main(int argc, char **argv)
     };
     qsort(scene.primitives.data, scene.primitives.size, sizeof(Primitive), compare_primitives_by_emission);
 
+    // Any primitive that has a non-zero emission parameter is considered a light.
     scene.num_lights = scene.primitives.size;
     for (u32 i = 0; i < scene.primitives.size; i++) {
         if (length_sq(scene.primitives[i].emission) == 0) {
