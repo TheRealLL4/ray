@@ -521,6 +521,11 @@ f32 ellipsoid_pdf(Vector3 p, Primitive *ellipsoid)
     return 1.0f / (4 * PI * sqrtf(n.x*n.x*r.y*r.y*r.z*r.z + r.x*r.x*n.y*n.y*r.z*r.z + r.x*r.x*r.y*r.y*n.z*n.z));
 }
 
+f32 area_formulation_density(f32 distance, Vector3 direction, Vector3 normal)
+{
+    return distance * distance / fabsf(dot(direction, normal));
+}
+
 f32 light_pdf(Primitive *light, Ray ray)
 {
     Intersection intersection = intersect_once(light, ray);
@@ -528,17 +533,18 @@ f32 light_pdf(Primitive *light, Ray ray)
     switch (light->type) {
     case PRIMITIVE_BOX:
         if (intersection.t > 0) {
-            pdf += box_pdf(light) * intersection.t * intersection.t / fabsf(dot(ray.direction, intersection.normal));
+            pdf += box_pdf(light) * area_formulation_density(intersection.t, ray.direction, intersection.normal);
             if (intersection.t_other > 0) {
-                pdf += box_pdf(light) * intersection.t_other * intersection.t_other / fabsf(dot(ray.direction, intersection.normal_other));
+                pdf += box_pdf(light) * area_formulation_density(intersection.t_other, ray.direction, intersection.normal_other);
             }
         }
         break;
     case PRIMITIVE_ELLIPSOID:
         if (intersection.t > 0) {
-            pdf += ellipsoid_pdf(ray.origin + intersection.t * ray.direction, light) * intersection.t * intersection.t / fabsf(dot(ray.direction, intersection.normal));
+            pdf += ellipsoid_pdf(ray.origin + intersection.t * ray.direction, light) * area_formulation_density(intersection.t, ray.direction, intersection.normal);
             if (intersection.t_other > 0) {
-                pdf += ellipsoid_pdf(ray.origin + intersection.t_other * ray.direction, light) * intersection.t_other * intersection.t_other / fabsf(dot(ray.direction, intersection.normal_other));
+                pdf += ellipsoid_pdf(ray.origin + intersection.t_other * ray.direction, light) *
+                    area_formulation_density(intersection.t_other, ray.direction, intersection.normal_other);
             }
         }
         break;
@@ -603,10 +609,9 @@ choose_light_that_is_not_a_plane:
             }
         }
 
-        // This is actually a hack since in some cases light_pdf will amount to zero
-        // even for the chosen_light, which indicates that light_pdf is probably buggy.
-        // It just happens to produce the correct result because of diffuse surfaces' BRDF.
-        if (pdf == 0) {
+        // Ignore rays that are obstructed by the primitive itself.
+        // Diffuse BRDF guarantees that they do not affect the resulting color.
+        if (dot(light_ray.direction, intersection.normal) <= 0) {
             return closest->emission;
         }
 
@@ -710,6 +715,16 @@ void fill_pixels(Scene *scene, u8 *pixels)
     }
 }
 
+u64 poly31_hash(char *buffer, u32 length)
+{
+    u64 hash = 0;
+    for (u32 i = 0; i < length; i++) {
+        hash = 31 * hash + buffer[i];
+    }
+
+    return hash;
+}
+
 PRIVATE_NAMESPACE_END
 
 extern "C"
@@ -742,7 +757,7 @@ int main(int argc, char **argv)
     fclose(file);
 
     Scene scene = {};
-    xoroshiro_set_seed(&scene.xoroshiro, 0xDEADBEEF);
+    xoroshiro_set_seed(&scene.xoroshiro, poly31_hash(buffer, length));
 
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
