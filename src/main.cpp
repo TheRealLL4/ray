@@ -611,7 +611,13 @@ choose_light_that_is_not_a_plane:
 
         // Ignore rays that are obstructed by the primitive itself.
         // Diffuse BRDF guarantees that they do not affect the resulting color.
-        if (dot(light_ray.direction, intersection.normal) <= 0) {
+        //
+        // FIXME: If we remove pdf <= 0 check then sometimes division by zero
+        // would occur and we would get black or white color. This should be
+        // impossible because we already check that cosine_pdf is
+        // non-zero and it is always non-negative, maybe it's some kind of a
+        // weird rounding error? It only happens in release builds.
+        if (dot(light_ray.direction, intersection.normal) <= 0 || pdf <= 0) {
             return closest->emission;
         }
 
