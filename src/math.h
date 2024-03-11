@@ -27,6 +27,16 @@ union Vector2
     }
 };
 
+inline bool operator==(Vector2 u, Vector2 v)
+{
+    return u.x == v.x && u.y == v.y;
+}
+
+inline bool operator!=(Vector2 u, Vector2 v)
+{
+    return u.x != v.x || u.y != v.y;
+}
+
 inline Vector2 operator-(Vector2 v)
 {
     return {-v.x, -v.y};
@@ -101,6 +111,16 @@ union Vector3
         return this->e[index];
     }
 };
+
+inline bool operator==(Vector3 u, Vector3 v)
+{
+    return u.x == v.x && u.y == v.y && u.z == v.z;
+}
+
+inline bool operator!=(Vector3 u, Vector3 v)
+{
+    return u.x != v.x || u.y != v.y || u.z != v.z;
+}
 
 inline Vector3 operator-(Vector3 v)
 {

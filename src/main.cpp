@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <float.h>
 #include <time.h>
 
 #define PRIVATE_NAMESPACE_NAME  ray
@@ -195,7 +196,7 @@ void write_ppm(const char *file_name, u32 width, u32 height, u8 *pixels)
 {
     FILE *file = fopen(file_name, "wb");
     if (!file) {
-        log("Could not open file `%s` for writing.", file_name);
+        printf("Could not open file `%s` for writing.", file_name);
         return;
     }
 
@@ -235,7 +236,7 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 {
     FILE *file = fopen(file_name, "wb");
     if (!file) {
-        log("Could not open file `%s` for writing.", file_name);
+        printf("Could not open file `%s` for writing.", file_name);
         return;
     }
 
@@ -462,7 +463,10 @@ Vector3 uniform_unit_sphere(Xoroshiro128 *xoroshiro)
 
 Vector3 cosine_weighted(Xoroshiro128 *xoroshiro, Vector3 normal)
 {
-    Vector3 v = uniform_unit_sphere(xoroshiro);
+    Vector3 v;
+    do {
+        v = uniform_unit_sphere(xoroshiro);
+    } while (v == -normal);
 
     return normalize(v + normal);
 }
@@ -611,13 +615,7 @@ choose_light_that_is_not_a_plane:
 
         // Ignore rays that are obstructed by the primitive itself.
         // Diffuse BRDF guarantees that they do not affect the resulting color.
-        //
-        // FIXME: If we remove pdf <= 0 check then sometimes division by zero
-        // would occur and we would get black or white color. This should be
-        // impossible because we already check that cosine_pdf is
-        // non-zero and it is always non-negative, maybe it's some kind of a
-        // weird rounding error? It only happens in release builds.
-        if (dot(light_ray.direction, intersection.normal) <= 0 || pdf <= 0) {
+        if (dot(light_ray.direction, intersection.normal) <= 0)
             return closest->emission;
         }
 
@@ -741,14 +739,14 @@ int main(int argc, char **argv)
     using namespace ray;
 
     if (argc != 3) {
-        log("Invalid number of command line arguments.");
+        printf("Invalid number of command line arguments.");
         return 1;
     }
 
     char *input_file_name = argv[1];
     FILE *file = fopen(input_file_name, "rb");
     if (!file) {
-        log("File `%s` not found.", input_file_name);
+        printf("File `%s` not found.", input_file_name);
         return 1;
     }
 
@@ -763,7 +761,13 @@ int main(int argc, char **argv)
     fclose(file);
 
     Scene scene = {};
-    xoroshiro_set_seed(&scene.xoroshiro, poly31_hash(buffer, length));
+
+#ifdef DEVELOPER
+    u64 seed = poly31_hash(buffer, length);
+#else
+    u64 seed = time(nullptr);
+#endif
+    xoroshiro_set_seed(&scene.xoroshiro, seed);
 
     Parser parser = {.buffer = buffer, .length = length};
     parse(&parser, &scene);
@@ -773,7 +777,10 @@ int main(int argc, char **argv)
     // elements of the scene.primitives array.
     auto compare_primitives_by_emission = [] (const void *a, const void *b) -> int
     {
-        f32 diff = length_sq(((Primitive *)b)->emission) - length_sq(((Primitive *)a)->emission);
+        const Primitive *p1 = (Primitive *) a;
+        const Primitive *p2 = (Primitive *) b;
+
+        f32 diff = length_sq(p2->emission) - length_sq(p1->emission);
         if (diff == 0) {
             return 0;
         } else if (diff < 0) {

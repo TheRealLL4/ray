@@ -34,34 +34,30 @@ inline u64 array_size(T (&array)[N])
 // Swap two objects
 #define SWAP(a, b) do { auto tmp = b; b = a; a = tmp; } while(false)
 
-// Logging:
-inline void log(const char *format, ...)
-{
+// ASSERT(condition);
+// ASSERT2(condition, message);
 #ifdef DEVELOPER
-    va_list args;
-    va_start(args, format);
+#define ASSERT(condition)                                                                \
+    do {                                                                                 \
+        if (!(condition)) {                                                              \
+            printf("In %s, defined in %s on line %d:\n"                                  \
+                "Assertion %s failed.", __FUNCTION__, __FILE__, __LINE__, #condition);   \
+            abort();                                                                     \
+        }                                                                                \
+    } while (false)
 
-//    vlog(format, args);
-    vprintf(format, args);
-    printf("\n");
-
-    va_end(args);
-#endif
-}
-
-// assert2(condition, message);
-#ifdef DEVELOPER
-#define assert2(condition, message)                                               \
-    do {                                                                          \
-        if (!(condition)) {                                                       \
-            log("In %s, defined in %s on line %d:\n"                              \
-                "Assertion `%s` failed.\n"                                        \
-                "%s\n", __FUNCTION__, __FILE__, __LINE__, #condition, message);   \
-            abort();                                                              \
-        }                                                                         \
+#define ASSERT2(condition, message)                                             \
+    do {                                                                        \
+        if (!(condition)) {                                                     \
+            printf("In %s, defined in %s on line %d:\n"                         \
+                "Assertion %s failed.\n"                                        \
+                "%s", __FUNCTION__, __FILE__, __LINE__, #condition, message);   \
+            abort();                                                            \
+        }                                                                       \
     } while (false)
 #else
-#define assert2(condition, message) (void) 0
+#define ASSERT(condition) (void) 0
+#define ASSERT2(condition, message) (void) 0
 #endif
 
 // defer { expression; };
@@ -98,7 +94,7 @@ struct Array
 
     T &operator[](u32 index)
     {
-        assert2(index < this->size, "Array index out of bounds.");
+        ASSERT2(index < this->size, "Array index out of bounds.");
         return this->data[index];
     }
 };
@@ -120,7 +116,7 @@ inline void array_maybe_expand(Array<T> *array, u32 to_add)
     }
 
     array->data = (T *) realloc(array->data, minimal_capacity * sizeof(T));
-    assert2(array->data, "realloc() failed.");
+    ASSERT2(array->data, "realloc() failed.");
 
     array->capacity = minimal_capacity;
 }
@@ -128,7 +124,7 @@ inline void array_maybe_expand(Array<T> *array, u32 to_add)
 template <typename T>
 inline T array_pop(Array<T> *array)
 {
-    assert2(array->size > 0, "Attempted to pop an element from an empty array.");
+    ASSERT2(array->size > 0, "Attempted to pop an element from an empty array.");
     return (*array)[--array->size];
 }
 
