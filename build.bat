@@ -18,7 +18,7 @@ IF NOT EXIST "%BUILD_DIR%\" (mkdir "%BUILD_DIR%")
 
 REM Set target compiler flags
 SET DEBUG_COMPILER_FLAGS=^
-    -O0 -g -DDEVELOPER=1 -ftrapv
+    -O0 -g -DDEVELOPER=1
 
 SET RELEASE_COMPILER_FLAGS=^
     -O2 -fwrapv
@@ -41,7 +41,7 @@ IF %ERRORLEVEL% NEQ 0 (echo "ERROR: clang not found. Please set up LLVM and add 
 SET COMPILER_FLAGS=^
     %TARGET_COMPILER_FLAGS%^
     -Wall -Wextra -Wpedantic -Wno-language-extension-token -Wno-unused-parameter -Wno-reorder-init-list -Wno-c99-designator^
-    -D_CRT_SECURE_NO_WARNINGS=1 -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-nested-anon-types^
+    -D_CRT_SECURE_NO_WARNINGS=1 -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-nested-anon-types -Wno-unused-function^
     -std=c++14 -fvisibility=hidden -fvisibility-inlines-hidden^
     -D_HAS_EXCEPTIONS=0 -fno-exceptions -fno-unwind-tables^
     -fno-rtti -mavx2 -ffast-math^
