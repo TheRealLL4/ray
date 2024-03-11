@@ -59,6 +59,6 @@ inline u32 xoroshiro_next_u32(Xoroshiro128 *xoroshiro, u32 n)
 
 inline f32 xoroshiro_next_f32(Xoroshiro128 *xoroshiro)
 {
-    return (xoroshiro_next_u64(xoroshiro) >> (64-24)) * 5.9604644775390625e-8f;
+    return (xoroshiro_next_u64(xoroshiro) >> (64-24)) * 5.9604644775390625E-8f;
 }
 

@@ -374,7 +374,7 @@ Intersection intersect_box(Primitive *box, Ray ray)
     Vector3 object_normal = (ray.origin + t * ray.direction) / dimensions;
     u32 max_index = 0;
     for (u32 i = 1; i < 3; i++) {
-        if (fabsf(object_normal[i]) > fabsf(object_normal[max_index])) {
+        if (ABS(object_normal[i]) > ABS(object_normal[max_index])) {
             max_index = i;
         }
     }
@@ -393,7 +393,7 @@ Intersection intersect_box(Primitive *box, Ray ray)
         Vector3 object_normal_other = (ray.origin + t_other * ray.direction) / dimensions;
         u32 max_index = 0;
         for (u32 i = 1; i < 3; i++) {
-            if (fabsf(object_normal_other[i]) > fabsf(object_normal_other[max_index])) {
+            if (ABS(object_normal_other[i]) > ABS(object_normal_other[max_index])) {
                 max_index = i;
             }
         }
@@ -422,15 +422,15 @@ Intersection intersect_once(Primitive *primitive, Ray world_ray)
 
     Intersection current;
     switch (primitive->type) {
-        case PRIMITIVE_PLANE:
-            current = intersect_plane(primitive, ray);
-            break;
-        case PRIMITIVE_ELLIPSOID:
-            current = intersect_ellipsoid(primitive, ray);
-            break;
-        case PRIMITIVE_BOX:
-            current = intersect_box(primitive, ray);
-            break;
+    case PRIMITIVE_PLANE:
+        current = intersect_plane(primitive, ray);
+        break;
+    case PRIMITIVE_ELLIPSOID:
+        current = intersect_ellipsoid(primitive, ray);
+        break;
+    case PRIMITIVE_BOX:
+        current = intersect_box(primitive, ray);
+        break;
     }
 
     return current;
@@ -490,7 +490,7 @@ Vector3 uniform_box(Xoroshiro128 *xoroshiro, Primitive *box)
     f32 random_u = 2 * xoroshiro_next_f32(xoroshiro) - 1;
     f32 random_v = 2 * xoroshiro_next_f32(xoroshiro) - 1;
 
-    f32 sign = xoroshiro_next_u32(xoroshiro, 1) ? 1 : -1;
+    f32 sign = 2.0f * xoroshiro_next_u32(xoroshiro, 1) - 1.0f;
 
     Vector3 point;
     f32 random_number = w * xoroshiro_next_f32(xoroshiro);
@@ -527,7 +527,7 @@ f32 ellipsoid_pdf(Vector3 p, Primitive *ellipsoid)
 
 f32 area_formulation_density(f32 distance, Vector3 direction, Vector3 normal)
 {
-    return distance * distance / fabsf(dot(direction, normal));
+    return distance * distance / ABS(dot(direction, normal));
 }
 
 f32 light_pdf(Primitive *light, Ray ray)
@@ -577,13 +577,12 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
     Xoroshiro128 *xoroshiro = &scene->xoroshiro;
     switch (closest->surface_type) {
     case SURFACE_DIFFUSE: {
-        Ray light_ray = {.origin = intersection_point + 1e-4 * intersection.normal};
+        Ray light_ray = {.origin = intersection_point + 1E-4 * intersection.normal};
         // In the num_lights == 0 case (the only source is scene->background_color)
         // use the cosine weighted distribution.
         if (xoroshiro_next_u32(xoroshiro, 1) || scene->num_lights == 0) {
             light_ray.direction = cosine_weighted(xoroshiro, intersection.normal);
         } else {
-            // TODO: What should we do if the only light source is a plane?
 choose_light_that_is_not_a_plane:
             u32 light_index = xoroshiro_next_u32(xoroshiro, scene->num_lights - 1);
             Primitive *chosen_light = &scene->primitives[light_index];
@@ -615,13 +614,7 @@ choose_light_that_is_not_a_plane:
 
         // Ignore rays that are obstructed by the primitive itself.
         // Diffuse BRDF guarantees that they do not affect the resulting color.
-        //
-        // FIXME: If we remove pdf <= 0 check then sometimes division by zero
-        // would occur and we would get black or white color. This should be
-        // impossible because we already check that cosine_pdf is
-        // non-zero and it is always non-negative, maybe it's some kind of a
-        // weird rounding error? It only happens in release builds.
-        if (dot(light_ray.direction, intersection.normal) <= 0 || pdf <= 0) {
+        if (dot(light_ray.direction, intersection.normal) <= 0) {
             return closest->emission;
         }
 
@@ -631,7 +624,7 @@ choose_light_that_is_not_a_plane:
     } break;
     case SURFACE_METALLIC: {
         Ray reflected_ray = {
-            .origin = intersection_point + 1e-4 * intersection.normal,
+            .origin = intersection_point + 1E-4 * intersection.normal,
             .direction = reflect(-ray.direction, intersection.normal),
         };
         Vector3 light = ray_trace(scene, reflected_ray, depth + 1);
@@ -642,7 +635,7 @@ choose_light_that_is_not_a_plane:
         Vector3 light = {};
 
         Ray reflected_ray = {
-            .origin = intersection_point + 1e-4 * intersection.normal,
+            .origin = intersection_point + 1E-4 * intersection.normal,
             .direction = reflect(-ray.direction, intersection.normal),
         };
         Vector3 reflected_light = ray_trace(scene, reflected_ray, depth + 1);
@@ -659,7 +652,7 @@ choose_light_that_is_not_a_plane:
             } else {
                 f32 cos_2 = sqrtf(1 - sin_2 * sin_2);
                 Ray refracted_ray = {
-                    .origin = intersection_point - 1e-4 * intersection.normal,
+                    .origin = intersection_point - 1E-4 * intersection.normal,
                     .direction = normalize(ior_quotient * ray.direction + (ior_quotient * cos_1 - cos_2) * intersection.normal),
                 };
                 Vector3 refracted_light = ray_trace(scene, refracted_ray, depth + 1);

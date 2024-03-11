@@ -44,7 +44,7 @@ SET COMPILER_FLAGS=^
     -D_CRT_SECURE_NO_WARNINGS=1 -Wno-gnu-anonymous-struct -Wno-missing-braces -Wno-nested-anon-types -Wno-unused-function^
     -std=c++14 -fvisibility=hidden -fvisibility-inlines-hidden^
     -D_HAS_EXCEPTIONS=0 -fno-exceptions -fno-unwind-tables^
-    -fno-rtti -mavx2 -ffast-math^
+    -fno-rtti -mavx2^
     -fuse-ld=lld -Wl,%TARGET_LINKER_FLAGS%,-incremental:no,-subsystem:console,-manifest:no^
     -o "%BUILD_DIR%\%PROGRAM_NAME%.exe"
 
