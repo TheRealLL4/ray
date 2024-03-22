@@ -13,6 +13,25 @@ typedef uint64_t u64;
 typedef float  f32;
 typedef double f64;
 
+// Limits:
+const s8 S8_MIN = 0x80;
+const s8 S8_MAX = 0x7F;
+const u8 U8_MAX = 0xFF;
+
+const s16 S16_MIN = 0x8000;
+const s16 S16_MAX = 0x7FFF;
+const u16 U16_MAX = 0xFFFF;
+
+const s32 S32_MIN = 0x80000000;
+const s32 S32_MAX = 0x7FFFFFFF;
+const u32 U32_MAX = 0xFFFFFFFFu;
+
+const s64 S64_MIN = 0x8000000000000000ll;
+const s64 S64_MAX = 0x7FFFFFFFFFFFFFFFll;
+const u64 U64_MAX = 0xFFFFFFFFFFFFFFFFull;
+
+#include "os/os.h"
+
 // Size of static array
 template <typename T, u64 N>
 inline u64 array_size(T (&array)[N])
@@ -20,19 +39,28 @@ inline u64 array_size(T (&array)[N])
     return N;
 }
 
-// Integer aligment
-#define INTEGER_ALIGN(x, a) (((x) + (a) - 1) / (a) * (a))
+#define ALIGN_POW2(x, a) (((x) + (a) - 1) & ~((a) - 1))
+#define DIV_UP(a, b) (((a) + (b) - 1) / (b))
 
 // Combine two 32-bit ints into a 64-bit int
-#define MAKE_U64(l, h) (((u64(h)) << 32ULL) + (l))
+#define MAKE_U64(l, h) (((u64(h)) << 32) + (l))
 
-// min, max, clamp(value, min, max)
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 #define CLAMP(v, l, h) (MAX(MIN(v, h), l))
 
-// Swap two objects
-#define SWAP(a, b) do { auto tmp = b; b = a; a = tmp; } while(false)
+// Logging:
+inline void debug_log(const char *format, ...)
+{
+#ifdef DEVELOPER
+    va_list args;
+    va_start(args, format);
+
+    os_debug_vlog(format, args);
+
+    va_end(args);
+#endif
+}
 
 // ASSERT(condition);
 // ASSERT2(condition, message);
@@ -40,36 +68,39 @@ inline u64 array_size(T (&array)[N])
 #define ASSERT(condition)                                                                \
     do {                                                                                 \
         if (!(condition)) {                                                              \
-            printf("In %s, defined in %s on line %d:\n"                                  \
-                "Assertion %s failed.", __FUNCTION__, __FILE__, __LINE__, #condition);   \
-            abort();                                                                     \
+            debug_log("%s(%d): Assertion `%s` failed.", __FILE__, __LINE__, #condition); \
+            os_debug_break();                                                            \
         }                                                                                \
     } while (false)
 
-#define ASSERT2(condition, message)                                             \
-    do {                                                                        \
-        if (!(condition)) {                                                     \
-            printf("In %s, defined in %s on line %d:\n"                         \
-                "Assertion %s failed.\n"                                        \
-                "%s", __FUNCTION__, __FILE__, __LINE__, #condition, message);   \
-            abort();                                                            \
-        }                                                                       \
+#define ASSERT2(condition, message)                           \
+    do {                                                      \
+        if (!(condition)) {                                   \
+            debug_log("%s(%d): Assertion `%s` failed: %s.",   \
+                    __FILE__, __LINE__, #condition, message); \
+            os_debug_break();                                 \
+        }                                                     \
     } while (false)
 #else
 #define ASSERT(condition) (void) 0
 #define ASSERT2(condition, message) (void) 0
 #endif
 
-// defer { expression; };
+// defer {expression;};
 template <typename F>
 struct Defer_Struct
 {
     F f;
-    Defer_Struct(F f) : f(f) {}
-    ~Defer_Struct() { f(); }
+
+    Defer_Struct(F to_defer) : f(to_defer) {}
+
+    ~Defer_Struct()
+    {
+        this->f();
+    }
 };
 
-enum class Defer_Initializer {};
+struct Defer_Initializer {};
 
 template <typename F>
 Defer_Struct<F> operator+(Defer_Initializer x, F to_defer)
@@ -83,27 +114,28 @@ Defer_Struct<F> operator+(Defer_Initializer x, F to_defer)
 #define defer                   auto DEFER_NAME_2(_defer_) = Defer_Initializer() + [&] ()
 
 // Dynamic array:
+const u32 ARRAY_MINIMAL_CAPACITY = 4;
 template <typename T>
 struct Array
 {
-    static const u32 MINIMAL_CAPACITY = 4U;
-
     T   *data    = nullptr;
     u32 capacity = 0;
     u32 size     = 0;
 
-    T &operator[](u32 index)
+    inline T &operator[](u32 index)
     {
         ASSERT2(index < this->size, "Array index out of bounds.");
         return this->data[index];
     }
 };
 
-#define FOR_EACH(array) for (auto it = (array).data; it != ((array).data + (array).size); it++)
+#define ARRAY_ITERATE(array) for (auto it = (array).data; it != ((array).data + (array).size); it++)
 
 template <typename T>
 inline void array_maybe_expand(Array<T> *array, u32 to_add)
 {
+    ASSERT(array->size <= U32_MAX - to_add);
+
     u32 minimal_capacity = array->size + to_add;
     if (minimal_capacity <= array->capacity) {
         return;
@@ -111,14 +143,20 @@ inline void array_maybe_expand(Array<T> *array, u32 to_add)
 
     if (minimal_capacity < 2 * array->capacity) {
         minimal_capacity = 2 * array->capacity;
-    } else if (minimal_capacity < Array<T>::MINIMAL_CAPACITY) {
-        minimal_capacity = Array<T>::MINIMAL_CAPACITY;
+    } else if (minimal_capacity < ARRAY_MINIMAL_CAPACITY) {
+        minimal_capacity = ARRAY_MINIMAL_CAPACITY;
     }
 
-    array->data = (T *) realloc(array->data, minimal_capacity * sizeof(T));
-    ASSERT2(array->data, "realloc() failed.");
+    if (array->data) {
+        array->data = (T *) os_reallocate(array->data, array->capacity, minimal_capacity * sizeof(T));
+    } else {
+        array->data = (T *) os_allocate(minimal_capacity * sizeof(T));
+    }
+    ASSERT(array->data);
 
-    array->capacity = minimal_capacity;
+    // os_allocate allocates pages, so re-calculate the capacity
+    u32 page_size = os_page_size(); // @SPEED: We shouldn't be doing this for every allocation
+    array->capacity = ALIGN_POW2(minimal_capacity * sizeof(T), page_size) / sizeof(T);
 }
 
 template <typename T>
@@ -133,12 +171,6 @@ inline void array_push(Array<T> *array, T value)
 {
     array_maybe_expand(array, 1);
     array->data[array->size++] = value;
-}
-
-template <typename T>
-inline void array_reserve(Array<T> *array, u32 count)
-{
-    array_maybe_expand(array, count);
 }
 
 template <typename T>
@@ -183,15 +215,9 @@ inline T array_delete(Array<T> *array, u32 index)
 }
 
 template <typename T>
-inline bool array_is_empty(Array<T> *array)
-{
-    return (array->size == 0);
-}
-
-template <typename T>
 inline void array_free(Array<T> *array)
 {
-    free(array->data);
+    os_free(array->data, array->capacity);
     *array = {};
 }
 

@@ -1,18 +1,11 @@
 #pragma once
 
+#include "basic.h"
+
 #define ABS(x) ((x) < 0 ? -(x) : (x))
+#define SQUARE(x) ((x) * (x))
 
 const f32 PI = 3.14159265f;
-
-inline f32 square(f32 x)
-{
-    return x * x;
-}
-
-inline f32 lerp(f32 a, f32 b, f32 t)
-{
-    return t * b + (1 - t) * a;
-}
 
 union Vector2
 {
@@ -23,7 +16,7 @@ union Vector2
 
     f32 e[2];
 
-    f32 &operator[](u32 index)
+    inline f32 &operator[](u32 index)
     {
         return this->e[index];
     }
@@ -69,6 +62,11 @@ inline Vector2 operator*(f32 a, Vector2 v)
     return {a * v.x, a * v.y};
 }
 
+inline Vector2 operator*(Vector2 v, f32 a)
+{
+    return {a * v.x, a * v.y};
+}
+
 inline Vector2 operator/(Vector2 v, f32 a)
 {
     return {v.x / a, v.y / a};
@@ -81,7 +79,7 @@ inline f32 length(Vector2 v)
 
 inline Vector2 normalize(Vector2 v)
 {
-    return v / length(v);
+    return v / sqrtf(v.x * v.x + v.y * v.y);
 }
 
 inline f32 dot(Vector2 u, Vector2 v)
@@ -108,7 +106,7 @@ union Vector3
 
     f32 e[3];
 
-    f32 &operator[](u32 index)
+    inline f32 &operator[](u32 index)
     {
         return this->e[index];
     }
@@ -182,6 +180,11 @@ inline Vector3 operator*(f32 a, Vector3 v)
     return {a * v.x, a * v.y, a * v.z};
 }
 
+inline Vector3 operator*(Vector3 v, f32 a)
+{
+    return {a * v.x, a * v.y, a * v.z};
+}
+
 inline Vector3 &operator*=(Vector3 &v, f32 a)
 {
     v = a * v;
@@ -213,7 +216,7 @@ inline f32 length(Vector3 v)
 
 inline Vector3 normalize(Vector3 v)
 {
-    return v / length(v);
+    return v / sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
 inline f32 dot(Vector3 u, Vector3 v)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "basic.h"
+
 inline u64 rotl64(u64 x, u8 b)
 {
     return (x << b) | (x >> (64-b));
@@ -12,17 +14,17 @@ struct Xoroshiro128
 
 inline void xoroshiro_set_seed(Xoroshiro128 *xoroshiro, u64 value)
 {
-    const u64 xl = 0x9E3779B97F4A7C15ull;
-    const u64 xh = 0x6A09E667F3BCC909ull;
-    const u64 a  = 0xBF58476D1CE4E5B9ull;
-    const u64 b  = 0x94D049BB133111EBull;
+    const u64 XL = 0x9E3779B97F4A7C15ull;
+    const u64 XH = 0x6A09E667F3BCC909ull;
+    const u64 A  = 0xBF58476D1CE4E5B9ull;
+    const u64 B  = 0x94D049BB133111EBull;
 
-    u64 l = value ^ xh;
-    u64 h = l + xl;
-    l = (l ^ (l >> 30)) * a;
-    h = (h ^ (h >> 30)) * a;
-    l = (l ^ (l >> 27)) * b;
-    h = (h ^ (h >> 27)) * b;
+    u64 l = value ^ XH;
+    u64 h = l + XL;
+    l = (l ^ (l >> 30)) * A;
+    h = (h ^ (h >> 30)) * A;
+    l = (l ^ (l >> 27)) * B;
+    h = (h ^ (h >> 27)) * B;
     l = l ^ (l >> 31);
     h = h ^ (h >> 31);
 

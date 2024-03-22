@@ -17,6 +17,12 @@ PRIVATE_NAMESPACE_BEGIN
 #include "math.h"
 #include "xoroshiro.h"
 
+#ifdef _WIN32
+#include "os/win32/win32.cpp"
+#elif defined(__linux__)
+#include "os/linux/linux.cpp"
+#endif
+
 enum Primitive_Type
 {
     PRIMITIVE_PLANE     = 0,
@@ -33,10 +39,10 @@ enum Surface_Type
 
 struct Primitive
 {
+    Vector3 parameters;
     Primitive_Type type;
     Surface_Type surface_type = SURFACE_DIFFUSE;
     f32 ior;
-    Vector3 parameters;
 
     Vector3    position = {0, 0, 0};
     Quaternion rotation = {0, 0, 0, 1};
@@ -76,8 +82,8 @@ struct Ray
 
 struct Intersection
 {
-    f32 t, t_other;
     Vector3 normal, normal_other;
+    f32 t, t_other;
     bool inner;
 };
 
@@ -242,7 +248,7 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 
     // HACK:
     u32 bmp_pixels_size = 4 * width * height;
-    u8 *bmp_pixels = (u8 *) malloc(bmp_pixels_size);
+    u8 *bmp_pixels = (u8 *) os_allocate(bmp_pixels_size);
 
     // Write pixels as BGR and flip them upside down
     for (u32 y = 0; y < height; y++) {
@@ -273,7 +279,7 @@ void write_bmp(const char *file_name, u32 width, u32 height, u8 *pixels)
 
     fclose(file);
 
-    free(bmp_pixels);
+    os_free(bmp_pixels, bmp_pixels_size);
 }
 #endif
 
@@ -441,7 +447,7 @@ Intersection intersect(Array<Primitive> primitives, Ray world_ray, Primitive **c
     Intersection out = {.t = INFINITY};
     *closest = nullptr;
 
-    FOR_EACH(primitives) {
+    ARRAY_ITERATE(primitives) {
         Intersection current = intersect_once(it, world_ray);
         if (current.t > 0 && current.t < out.t && current.t < t_max) {
             out = current;
@@ -580,7 +586,7 @@ Vector3 ray_trace(Scene *scene, Ray ray, u32 depth)
         Ray light_ray = {.origin = intersection_point + 1E-4 * intersection.normal};
         // In the num_lights == 0 case (the only source is scene->background_color)
         // use the cosine weighted distribution.
-        if (xoroshiro_next_u32(xoroshiro, 1) || scene->num_lights == 0) {
+        if (scene->num_lights == 0 || xoroshiro_next_u32(xoroshiro, 1)) {
             light_ray.direction = cosine_weighted(xoroshiro, intersection.normal);
         } else {
 choose_light_that_is_not_a_plane:
@@ -644,7 +650,7 @@ choose_light_that_is_not_a_plane:
         f32 cos_1 = dot(intersection.normal, -ray.direction);
         f32 sin_2 = ior_quotient * sqrtf(1 - cos_1 * cos_1);
         if (sin_2 <= 1) {
-            f32 reflection_coefficient = square((ior_quotient - 1) / (ior_quotient + 1));
+            f32 reflection_coefficient = SQUARE((ior_quotient - 1) / (ior_quotient + 1));
             f32 r = reflection_coefficient + (1 - reflection_coefficient) * powf(1 - cos_1, 5.0f);
             f32 random_number_in_unit_inverval = xoroshiro_next_f32(xoroshiro);
             if (random_number_in_unit_inverval < r) {
@@ -674,13 +680,13 @@ choose_light_that_is_not_a_plane:
 
 Vector3 aces_tonemap(Vector3 x)
 {
-    const Vector3 a = {2.51f, 2.51f, 2.51f};
-    const Vector3 b = {0.03f, 0.03f, 0.03f};
-    const Vector3 c = {2.43f, 2.43f, 2.43f};
-    const Vector3 d = {0.59f, 0.59f, 0.59f};
-    const Vector3 e = {0.14f, 0.14f, 0.14f};
+    const Vector3 A = {2.51f, 2.51f, 2.51f};
+    const Vector3 B = {0.03f, 0.03f, 0.03f};
+    const Vector3 C = {2.43f, 2.43f, 2.43f};
+    const Vector3 D = {0.59f, 0.59f, 0.59f};
+    const Vector3 E = {0.14f, 0.14f, 0.14f};
 
-    return pow(clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f), 1.0f / 2.2f);
+    return pow(clamp((x * (A * x + B)) / (x * (C * x + D) + E), 0.0f, 1.0f), 1.0f / 2.2f);
 }
 
 #define ROUND_COLOR(f) (roundf((f) * 255.0f))
@@ -718,7 +724,7 @@ void fill_pixels(Scene *scene, u8 *pixels)
     }
 }
 
-u64 poly31_hash(char *buffer, u32 length)
+u64 poly31_hash(u8 *buffer, u32 length)
 {
     u64 hash = 0;
     for (u32 i = 0; i < length; i++) {
@@ -742,33 +748,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    char *input_file_name = argv[1];
-    FILE *file = fopen(input_file_name, "rb");
-    if (!file) {
-        printf("File `%s` not found.", input_file_name);
+    File file;
+    file.name = argv[1];
+    if (!os_read_file(&file)) {
         return 1;
     }
-
-    fseek(file, 0, SEEK_END);
-    u32 length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char *buffer = (char *) malloc(length + 1);
-    fread(buffer, 1, length, file);
-    buffer[length] = 0;
-
-    fclose(file);
 
     Scene scene = {};
 
 #ifdef DEVELOPER
-    u64 seed = poly31_hash(buffer, length);
+    u64 seed = poly31_hash(file.data, file.size);
 #else
     u64 seed = time(nullptr);
 #endif
     xoroshiro_set_seed(&scene.xoroshiro, seed);
 
-    Parser parser = {.buffer = buffer, .length = length};
+    Parser parser = {.buffer = (char *) file.data, .length = file.size};
     parse(&parser, &scene);
 
     // Sort the primitives by emission in descending order so that later we can
@@ -799,7 +794,7 @@ int main(int argc, char **argv)
         }
     }
 
-    u8 *pixels = (u8 *) malloc(3 * scene.width * scene.height);
+    u8 *pixels = (u8 *) os_allocate(3 * scene.width * scene.height);
 
     Vector3 tonemapped_background_color = aces_tonemap(scene.background_color);
     for (u32 i = 0; i < 3 * scene.width * scene.height; i += 3) {
